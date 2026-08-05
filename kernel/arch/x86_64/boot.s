@@ -1,0 +1,132 @@
+/* Multiboot2 Header Constants */
+.set MULTIBOOT2_MAGIC,     0xe85250d6
+.set MULTIBOOT2_ARCH_X86,  0
+.set HEADER_LENGTH,        (multiboot_header_end - multiboot_header)
+.set CHECKSUM,             -(MULTIBOOT2_MAGIC + MULTIBOOT2_ARCH_X86 + HEADER_LENGTH)
+
+.section .multiboot2, "a"
+.align 8
+multiboot_header:
+    .long MULTIBOOT2_MAGIC
+    .long MULTIBOOT2_ARCH_X86
+    .long HEADER_LENGTH
+    .long CHECKSUM
+
+    /* Entry Address Tag */
+    .short 3
+    .short 0
+    .long 12
+    .long _start
+
+    /* End Tag */
+    .short 0
+    .short 0
+    .long 8
+multiboot_header_end:
+
+/* Xen PVH ELF Note for QEMU Direct Kernel Boot */
+.section .xen_note, "a", @note
+.align 4
+pvh_note_start:
+    .long 4                    /* Name length ("Xen\0") */
+    .long 4                    /* Desc length (4 bytes) */
+    .long 18                   /* XEN_ELFNOTE_PHYS32_ENTRY (18) */
+    .asciz "Xen"
+    .align 4
+    .long _start               /* 32-bit Physical Entry Address */
+
+/* Initial Page Tables (PML4, PDPT, PD) */
+.section .bss
+.align 4096
+pml4:
+    .skip 4096
+pdpt:
+    .skip 4096
+pd:
+    .skip 4096
+
+.align 16
+stack_bottom:
+    .skip 16384 /* 16 KiB Boot Stack */
+stack_top:
+
+/* Early GDT for 64-bit Long Mode Transition */
+.section .rodata
+.align 8
+gdt64:
+    .quad 0 # Null Descriptor
+    .quad 0x00af9a000000ffff # 64-bit Code Segment (Kernel)
+    .quad 0x00cf92000000ffff # 64-bit Data Segment (Kernel)
+gdt64_pointer:
+    .word . - gdt64 - 1
+    .quad gdt64
+
+/* 32-bit Protected Mode Entry */
+.section .text
+.code32
+.global _start
+.type _start, @function
+_start:
+    cli
+    mov $stack_top, %esp
+
+    /* Set up Page Tables (Identity mapping first 1GB using 2MB Huge Pages) */
+    mov $pdpt, %eax
+    or $0x3, %eax /* Present + Writable */
+    mov %eax, pml4
+
+    mov $pd, %eax
+    or $0x3, %eax
+    mov %eax, pdpt
+
+    mov $0, %ecx
+1:
+    mov %ecx, %eax
+    shl $21, %eax /* multiply by 2MB */
+    or $0x83, %eax /* Present + Writable + Huge Page (bit 7) */
+    mov %eax, pd(,%ecx,8)
+    inc %ecx
+    cmp $512, %ecx
+    jne 1b
+
+    /* Load PML4 to CR3 */
+    mov $pml4, %eax
+    mov %eax, %cr3
+
+    /* Enable PAE in CR4 */
+    mov %cr4, %eax
+    or $0x20, %eax
+    mov %eax, %cr4
+
+    /* Set Long Mode Bit in EFER MSR (0xC0000080) */
+    mov $0xC0000080, %ecx
+    rdmsr
+    or $0x100, %eax
+    wrmsr
+
+    /* Enable Paging in CR0 */
+    mov %cr0, %eax
+    or $0x80000001, %eax
+    mov %eax, %cr0
+
+    /* Load 64-bit GDT */
+    lgdt gdt64_pointer
+
+    /* Far jump to 64-bit Long Mode code segment */
+    ljmp $0x08, $long_mode_start
+
+.code64
+long_mode_start:
+    /* Reload 64-bit data segment registers */
+    mov $0x10, %ax
+    mov %ax, %ds
+    mov %ax, %es
+    mov %ax, %fs
+    mov %ax, %gs
+    mov %ax, %ss
+
+    /* Jump to C++ Kernel Main */
+    call kernel_main
+
+1:  hlt
+    jmp 1b

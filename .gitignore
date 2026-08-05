@@ -1,0 +1,29 @@
+# Build Output Directories
+build/
+bin/
+out/
+*.elf
+*.bin
+*.iso
+*.o
+*.obj
+*.a
+
+# CMake Generated Files & Cache
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# IDE & Editor Directories
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Log & Temporary Files
+*.log
+*.tmp
