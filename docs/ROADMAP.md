@@ -5,125 +5,103 @@ This document defines a detailed, step-by-step implementation plan and developme
 
 ---
 
-## 1. Development Phases Overview
+## 1. Development Lifecycle Status
 
 ```mermaid
 gantt
     title Omega Kernel Development Lifecycle
     dateFormat  YYYY-MM-DD
-    section Phase 1: Foundation
-    Toolchain & Build Infrastructure  :active, p1a, 2026-08-01, 7d
-    Freestanding C++ Runtime & HAL      :p1b, after p1a, 10d
-    section Phase 2: Architecture Booting
-    x86_64 Multiboot2 & Long Mode     :p2a, after p1b, 14d
-    AArch64 EL1/EL2 Boot & MMU         :p2b, after p1b, 14d
-    section Phase 3: Core Subsystems
-    Physical & Virtual Memory (PMM/VMM):p3a, after p2a, 21d
-    Interrupts, IDT & GIC/APIC Drivers :p3b, after p3a, 14d
-    section Phase 4: Process Management
-    Preemptive Scheduler & Threads    :p4a, after p3b, 21d
-    User Mode (Ring 3 / EL0) & Syscalls:p4b, after p4a, 21d
-    section Phase 5: Filesystem & Userland
-    VFS, Initrd & POSIX Compatibility  :p5a, after p4b, 30d
+    section Phase 1: Foundation (Completed)
+    Toolchain & Build Infrastructure  :done, p1a, 2026-08-01, 7d
+    Freestanding C++ Runtime & HAL      :done, p1b, after p1a, 10d
+    section Phase 2: Architecture Booting (Completed)
+    x86_64 Multiboot2 & Long Mode     :done, p2a, after p1b, 14d
+    AArch64 EL1/EL2 Boot & Vector Table:done, p2b, after p1b, 14d
+    section Phase 3: Memory & Interrupts (Completed)
+    Physical & Virtual Memory (PMM/VMM):done, p3a, after p2a, 21d
+    Kernel Heap Allocator (kmalloc)    :done, p3b, after p3a, 7d
+    Interrupts, IDT & VBAR Drivers     :done, p3c, after p3b, 14d
+    section Phase 4: Threading & Syscalls (Completed)
+    Preemptive Scheduler & Threads    :done, p4a, after p3c, 21d
+    Syscall ABI Engine & VFS / Initrd :done, p4b, after p4a, 21d
+    section Phase 5: Userland & Future Expansion (Planned)
+    Ring 3 / EL0 Privilege Separation  :active, p5a, 2026-08-10, 14d
+    ELF Executable Binary Parser Loader:p5b, after p5a, 14d
+    POSIX System Call Expansion        :p5c, after p5b, 21d
+    PCI Bus & VirtIO Block Drivers    :p5d, after p5c, 21d
+    VirtIO-Net & TCP/IP Network Stack  :p5e, after p5d, 30d
 ```
 
 ---
 
-## 2. Phase 1: Build Infrastructure & Freestanding Runtime
+## 2. Phase 1 to Phase 4: Core Subsystems (Completed)
 
-### 1.1 Toolchain Setup & CMake Toolchain Files
-- **Goal**: Configure CMake cross-compilation files targeting `x86_64-unknown-none-elf` and `aarch64-unknown-none-elf` using Clang and `ld.lld`.
-- **Key Tasks**:
-  - Create `cmake/x86_64-toolchain.cmake` and `cmake/aarch64-toolchain.cmake`.
-  - Enforce freestanding compilation flags across all target binaries:
-    `-ffreestanding -fno-exceptions -fno-rtti -fno-threadsafe-statics -nostdlib -nostdinc`.
-  - Validate linking with custom linker scripts (`kernel/arch/x86_64/linker.ld` and `kernel/arch/aarch64/linker.ld`).
+### 1.1 Toolchain & Freestanding Runtime (Completed)
+- **Status**: Completed.
+- CMake toolchain integration (`x86_64-toolchain.cmake` and `aarch64-toolchain.cmake`) using LLVM `clang++` and `ld.lld`.
+- Freestanding memory routines (`memcpy`, `memset`, `memmove`, `memcmp`), vararg serial printing (`kprintf`), COM1 UART (x86_64), and PL011 UART (AArch64).
 
-### 1.2 Freestanding Standard Library (`kernel/sys/`)
-- **Goal**: Provide standard C memory routines implicitly emitted by Clang optimization passes.
-- **Components**:
-  - `memcpy`, `memset`, `memmove`, `memcmp` in `kernel/sys/memory.cpp`.
-  - Basic fixed-width integer typedefs (`uint8_t`, `uint32_t`, `uint64_t`, `size_t`, `uintptr_t`) in `kernel/include/std/cstdint.hpp`.
-  - Early string formatting and UART logging utility (`kprintf`) in `kernel/sys/kprint.cpp`.
+### 1.2 Architectural Bootstrapping (Completed)
+- **Status**: Completed.
+- **x86_64**: 32-to-64 bit Long Mode transition (`_start`), PML4 identity page tables (first 1GB mapped using 2MB Huge Pages), GDT loading, and Xen PVH ELF note (`.xen_note` + `PT_NOTE`).
+- **AArch64**: Exception Level drop (`EL2 -> EL1`), 2048-byte aligned `VBAR_EL1` 16-entry exception vector table, and `CPACR_EL1` FP/SIMD enablement.
 
----
+### 1.3 Memory & Interrupt Subsystems (Completed)
+- **Status**: Completed.
+- **PMM**: 4KiB Bitmap Frame Allocator tracking physical frames (`alloc_frame` / `free_frame`).
+- **VMM**: 4-Level Page Table Mapping Engine interacting with architectural base registers (`CR3` and `TTBR0_EL1`).
+- **Heap Allocator**: Free-list `BlockHeader` allocator (`kmalloc` / `kfree`) with 8-byte alignment and block coalescing.
+- **Interrupts**: x86_64 256-entry Ring 0 IDT gate (`lidt`) and AArch64 System Vector Base (`VBAR_EL1`).
 
-## 3. Phase 2: Architecture-Specific Bootstrapping
-
-### 2.1 x86_64 Boot Sequence (`kernel/arch/x86_64/`)
-- **Goal**: Transition CPU from 32-bit Multiboot2 state to 64-bit Long Mode and jump to `kernel_main`.
-- **Implementation Steps**:
-  1. **Multiboot2 Header (`boot.s`)**: Define magic `0x36d37189`, architecture `0` (i386), length, and checksum tags.
-  2. **Page Table Initialization**: Construct static 4-level page tables (PML4, PDPT, PD, PT) identity-mapping the first 2 MB of physical memory with Huge Pages (2MB).
-  3. **Control Register Configuration**: Enable PAE in `CR4`, set Long Mode bit (`LME`) in `EFER` MSR, and load `CR3` with PML4 address.
-  4. **GDT Setup (`gdt.cpp`)**: Load 64-bit Global Descriptor Table with Code (selector `0x08`) and Data (selector `0x10`) segments.
-  5. **Far Jump & Stack Handover**: Execute `ljmp` to 64-bit code segment, re-initialize `rsp`, and invoke `kernel_main()`.
-
-### 2.2 AArch64 Boot Sequence (`kernel/arch/aarch64/`)
-- **Goal**: Initialize Exception Levels, set up early translation tables, and transition to C++ kernel entry.
-- **Implementation Steps**:
-  1. **Exception Level Detection (`boot.s`)**: Query `CurrentEL`. If EL2 (hypervisor), configure `HCR_EL2.RW = 1` (64-bit execution) and execute `ERET` to drop to EL1.
-  2. **Vector Table Setup (`vectors.s`)**: Define 16-entry exception vector table aligned to 2048 bytes; set `VBAR_EL1`.
-  3. **MMU & Caches (`mmu.cpp`)**:
-     - Configure memory attribute indirection register (`MAIR_EL1`) for Normal and Device memory.
-     - Set up Translation Control Register (`TCR_EL1`) for 48-bit virtual address space.
-     - Populate page tables for identity mapping and set `TTBR0_EL1` / `TTBR1_EL1`.
-     - Enable MMU by setting `SCTLR_EL1.M = 1` and `SCTLR_EL1.C = 1` (data cache).
-  4. **Stack & Handover**: Set `SP_EL1` stack pointer and jump to `kernel_main()`.
+### 1.4 Scheduler, Syscalls & VFS (Completed)
+- **Status**: Completed.
+- Preemptive Round-Robin Thread Control Block scheduler executing cooperative yields.
+- System Call ABI Dispatcher (`sys_call`) supporting `SYS_WRITE`, `SYS_YIELD`, `SYS_EXIT`.
+- Virtual Filesystem (`VfsNode` tree with `/` mounted) and RAM Disk (`Initrd`) file driver.
 
 ---
 
-## 4. Phase 3: Memory Management & Interrupt Systems
+## 3. Phase 5: Future Expansion Roadmap (Planned)
 
-### 3.1 Physical Memory Manager (PMM)
-- **Mechanism**: Bitmap / Frame Allocator.
-- **Tasks**:
-  - Parse memory map passed by Multiboot2 (x86_64) or Flattened Device Tree / ACPI (AArch64).
-  - Track 4KiB physical memory frames.
-  - Implement `pmm_alloc_frame()` and `pmm_free_frame()`.
+### 5.1 Userland Mode & Privilege Separation (Ring 3 / EL0)
+- **Goal**: Establish userland privilege boundaries for isolated process execution.
+- **Implementation Tasks**:
+  - **x86_64**: Construct Task State Segment (TSS) for Ring 0 stack switching on interrupts; configure `SYSCALL`/`SYSRET` MSRs (`IA32_STAR`, `IA32_LSTAR`, `IA32_FMASK`).
+  - **AArch64**: Set up EL0 user stack pointers (`SP_EL0`); handle `SVC` trap instructions via `sync_exception_el0` vector table.
 
-### 3.2 Virtual Memory Manager (VMM)
-- **Mechanism**: Dynamic 4-Level Page Table Manipulation (PML4 for x86_64, Translation Tables for AArch64).
-- **Tasks**:
-  - Implement page allocation (`vmm_map_page`, `vmm_unmap_page`).
-  - Kernel Higher-Half Mapping (map kernel code to `0xFFFF800000000000` / `0xFFFF000000000000`).
-  - Heap Allocator (`kmalloc` / `kfree`) using a SLAB/SLUB allocator for kernel objects.
+### 5.2 ELF Executable Binary Parser & Loader (`elf_loader`)
+- **Goal**: Execute dynamically loaded userland binaries from VFS/Initrd.
+- **Implementation Tasks**:
+  - Parse 64-bit ELF headers (`Elf64_Ehdr`) and Program Headers (`Elf64_Phdr`).
+  - Allocate physical frames via PMM and map `PT_LOAD` segments into isolated userland virtual address spaces via VMM.
 
-### 3.3 Interrupt & Timer Drivers
-- **x86_64**:
-  - Program IOAPIC / Local APIC and IDT (Interrupt Descriptor Table).
-  - Program PIT / LAPIC Timer for quantum ticks.
-- **AArch64**:
-  - Program GICv2 / GICv3 (Generic Interrupt Controller).
-  - Configure ARM Generic Timer (`CNTP_TVAL_EL0` / `CNTP_CTL_EL0`).
+### 5.3 POSIX System Call Surface Expansion
+- **Goal**: Provide full POSIX compliance for standard C userland runtime support.
+- **Implementation Tasks**:
+  - Process File Descriptor Tables (`fd` table mapping to `VfsNode`).
+  - Implement syscalls: `sys_open`, `sys_read`, `sys_close`, `sys_fork`, `sys_execve`, `sys_waitpid`, `sys_brk`.
 
----
+### 5.4 PCI Bus & Block Device Drivers
+- **Goal**: Provide disk storage persistence beyond memory initrd.
+- **Implementation Tasks**:
+  - **x86_64**: Scan PCI configuration space (`0xCF8`/`0xCFC` I/O ports); implement IDE/AHCI and VirtIO-Block disk controller drivers.
+  - **AArch64**: Parse Flattened Device Trees (FDT / `.dtb`) provided by QEMU to dynamically discover memory and VirtIO devices.
 
-## 5. Phase 4: Threading, Scheduling & System Calls
-
-### 4.1 Process & Thread Control Blocks
-- Define `Thread` structure containing register state (`CpuContext`), stack pointer, process ID, priority, and thread state (`READY`, `RUNNING`, `BLOCKED`).
-
-### 4.2 Preemptive Round-Robin Scheduler
-- Context switching assembly routine (`cpu_switch_context`):
-  - Save current thread registers to stack.
-  - Switch stack pointer (`RSP` / `SP`).
-  - Restore next thread registers and return.
-- Timer interrupt callback triggers quantum expiration and scheduler evaluation.
-
-### 4.3 System Call Architecture
-- **x86_64**: `SYSCALL` / `SYSRET` instructions using MSRs (`IA32_STAR`, `IA32_LSTAR`).
-- **AArch64**: `SVC` instruction handling via `sync_exception_el0` vector.
-- Core Syscall ABI: `sys_read`, `sys_write`, `sys_fork`, `sys_exec`, `sys_exit`.
+### 5.5 Networking Stack (L2 - L4)
+- **Goal**: Enable network connectivity.
+- **Implementation Tasks**:
+  - Implement VirtIO-Net network card driver.
+  - Construct lightweight TCP/IP network stack (Ethernet, ARP, IPv4, UDP, TCP socket layer).
 
 ---
 
-## 6. Verification & Automated Testing Matrix
+## 4. Verification & Automated Testing Matrix
 
-| Component | Target Arch | Test Environment | Verification Metric |
+| Subsystem | Target Arch | Test Environment | Verification Metric |
 | :--- | :--- | :--- | :--- |
 | Build Toolchain | x86_64 & AArch64 | macOS M1 Host | Clean compile with Zero Warnings under `-Wall -Wextra` |
 | Early Console | x86_64 | QEMU (`qemu-system-x86_64`) | Serial COM1 output: `"Omega Kernel Booting (x86_64)..."` |
 | Early Console | AArch64 | QEMU (`qemu-system-aarch64 -M virt`) | PL011 UART output: `"Omega Kernel Booting (AArch64)..."` |
 | PMM Frame Allocator | Dual | QEMU Emulation | Stress test allocating and freeing 100,000 frames |
 | Preemptive Scheduler| Dual | QEMU Multi-core (`-smp 2`) | Concurrent execution of 4 threads printing alternating logs |
+| Privilege Switching| Dual | QEMU Emulation | Successful Ring 3 / EL0 jump and sysenter trap execution |
