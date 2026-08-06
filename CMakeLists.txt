@@ -4,7 +4,7 @@ project(OmegaKernel C CXX ASM)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option(ARCH "Target Architecture (x86_64 or aarch64)" "x86_64")
+option(ARCH "Target Architecture (x86_64, aarch64, riscv64)" "x86_64")
 message(STATUS "Configuring Omega Kernel for Architecture: ${ARCH}")
 
 find_program(LLD_PATH ld.lld PATHS /opt/homebrew/bin /usr/local/bin)
@@ -63,8 +63,17 @@ elseif(ARCH STREQUAL "aarch64")
         kernel/arch/aarch64/gic.cpp
         kernel/arch/aarch64/pci.cpp
     )
+elseif(ARCH STREQUAL "riscv64")
+    set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/kernel/arch/riscv64/linker.ld")
+    list(APPEND KERNEL_SOURCES
+        kernel/arch/riscv64/boot.s
+        kernel/arch/riscv64/trap.s
+        kernel/arch/riscv64/uart.cpp
+        kernel/arch/riscv64/plic.cpp
+        kernel/arch/riscv64/pci.cpp
+    )
 else()
-    message(FATAL_ERROR "Unsupported Architecture: ${ARCH}. Choose x86_64 or aarch64.")
+    message(FATAL_ERROR "Unsupported Architecture: ${ARCH}. Choose x86_64, aarch64, or riscv64.")
 endif()
 
 add_compile_options(${FREESTANDING_FLAGS})

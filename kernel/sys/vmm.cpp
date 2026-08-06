@@ -11,14 +11,14 @@ void VirtualMemoryManager::init() {
     asm volatile("mov %%cr3, %0" : "=r"(current_pml4_or_ttbr));
 #elif defined(__aarch64__)
     asm volatile("mrs %0, ttbr0_el1" : "=r"(current_pml4_or_ttbr));
+#elif defined(__riscv)
+    asm volatile("csrr %0, satp" : "=r"(current_pml4_or_ttbr));
 #endif
     kernel::kprintf("[+] Virtual Memory Manager (VMM) initialized.\n");
-    kernel::kprintf("    Page Table Base Register: %x\n", current_pml4_or_ttbr);
 }
 
 bool VirtualMemoryManager::map_page(uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags) {
     (void)flags;
-    // Align to 4KiB page boundaries
     virt_addr &= ~(PAGE_SIZE - 1);
     phys_addr &= ~(PAGE_SIZE - 1);
 
@@ -33,7 +33,7 @@ bool VirtualMemoryManager::unmap_page(uintptr_t virt_addr) {
 }
 
 uintptr_t VirtualMemoryManager::get_physical_address(uintptr_t virt_addr) {
-    return virt_addr; // Early Identity Mapping Fallback
+    return virt_addr;
 }
 
 } // namespace memory

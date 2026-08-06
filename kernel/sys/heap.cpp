@@ -1,5 +1,6 @@
 #include "kernel/heap.hpp"
 #include "kernel/kprint.hpp"
+#include "kernel/memory.hpp"
 
 namespace memory {
 
@@ -7,16 +8,17 @@ HeapAllocator::BlockHeader* HeapAllocator::free_list_head = nullptr;
 
 void HeapAllocator::init(uintptr_t heap_start, size_t heap_size) {
     free_list_head = reinterpret_cast<BlockHeader*>(heap_start);
-    free_list_head->size = heap_size - sizeof(BlockHeader);
-    free_list_head->is_free = true;
-    free_list_head->next = nullptr;
+    if (free_list_head) {
+        free_list_head->size = heap_size - sizeof(BlockHeader);
+        free_list_head->is_free = true;
+        free_list_head->next = nullptr;
+    }
 
     kernel::kprintf("[+] Kernel Heap Allocator initialized.\n");
-    kernel::kprintf("    Heap Start: %x, Total Heap Size: %u bytes\n", heap_start, heap_size);
 }
 
 void* HeapAllocator::kmalloc(size_t size) {
-    if (size == 0) return nullptr;
+    if (size == 0 || !free_list_head) return nullptr;
 
     // Align size to 8 bytes
     size = (size + 7) & ~7;
@@ -24,7 +26,6 @@ void* HeapAllocator::kmalloc(size_t size) {
     BlockHeader* current = free_list_head;
     while (current) {
         if (current->is_free && current->size >= size) {
-            // Can block be split?
             if (current->size >= size + sizeof(BlockHeader) + 16) {
                 BlockHeader* next_block = reinterpret_cast<BlockHeader*>(
                     reinterpret_cast<uintptr_t>(current) + sizeof(BlockHeader) + size
@@ -47,14 +48,13 @@ void* HeapAllocator::kmalloc(size_t size) {
 }
 
 void HeapAllocator::kfree(void* ptr) {
-    if (!ptr) return;
+    if (!ptr || !free_list_head) return;
 
     BlockHeader* header = reinterpret_cast<BlockHeader*>(
         reinterpret_cast<uintptr_t>(ptr) - sizeof(BlockHeader)
     );
     header->is_free = true;
 
-    // Coalesce adjacent free blocks
     BlockHeader* current = free_list_head;
     while (current && current->next) {
         if (current->is_free && current->next->is_free) {
