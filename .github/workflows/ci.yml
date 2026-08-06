@@ -1,0 +1,48 @@
+name: Omega Kernel CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    container:
+      image: alpine:3.19
+      options: --user root
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Install Build Dependencies & Toolchains
+        run: |
+          apk add --no-cache bash build-base cmake ninja clang17 llvm17 lld qemu-system-x86_64 qemu-system-aarch64 qemu-system-riscv64 qemu-img mtools dosfstools xorriso tcl tk git make
+
+      - name: Run Multi-Arch QEMU Kernel Integration Tests
+        run: |
+          chmod +x scripts/test.sh
+          ./scripts/test.sh
+
+      - name: Generate Bootable Disk Images (RAW, QCOW2, VMDK, VDI)
+        run: |
+          chmod +x scripts/create_bootable_disk.sh
+          ./scripts/create_bootable_disk.sh
+
+      - name: Run Bootable Disk Image Verification Test Suite
+        run: |
+          chmod +x scripts/test_disk_images.sh
+          ./scripts/test_disk_images.sh
+
+      - name: Run Omega Virtual Device (OVD) Integration Tests
+        run: |
+          chmod +x emulator/test_ovd.sh
+          ./emulator/test_ovd.sh
+
+      - name: Run OVD Tcl/Tk GUI Unit Tests
+        run: |
+          chmod +x emulator/test_ovd_gui.tcl
+          tclsh emulator/test_ovd_gui.tcl
