@@ -71,31 +71,30 @@ jobs:
           chmod +x scripts/create_bootable_disk.sh
           ./scripts/create_bootable_disk.sh
 
-      - name: Package Versioned Kernel Artifacts & Disk Images
+      - name: Package Human-Friendly Binary & Disk Assets
         run: |
           mkdir -p artifacts_release
-          VER=${SYS_VERSION}
           
-          # Copy Versioned Kernel Binaries
-          cp build/x86_64/omega.elf artifacts_release/omega-${VER}-x86_64.elf
-          cp build/aarch64/omega.elf artifacts_release/omega-${VER}-aarch64.elf
-          cp build/riscv64/omega.elf artifacts_release/omega-${VER}-riscv64.elf
+          # Clean & Human-Friendly Kernel ELF Binaries
+          cp build/x86_64/omega.elf artifacts_release/omega-x86_64.elf
+          cp build/aarch64/omega.elf artifacts_release/omega-aarch64.elf
+          cp build/riscv64/omega.elf artifacts_release/omega-riscv64.elf
           
-          # Copy & Rename Versioned Disk Images
-          cp disk_images/omega-x86_64-bootable.img artifacts_release/omega-${VER}-x86_64.img
-          cp disk_images/omega-x86_64-bootable.qcow2 artifacts_release/omega-${VER}-x86_64.qcow2
-          cp disk_images/omega-x86_64-bootable.vmdk artifacts_release/omega-${VER}-x86_64.vmdk
-          cp disk_images/omega-x86_64-bootable.vdi artifacts_release/omega-${VER}-x86_64.vdi
+          # Clean & Human-Friendly Virtual Disk Images
+          cp disk_images/omega-x86_64-bootable.img artifacts_release/omega-x86_64.img
+          cp disk_images/omega-x86_64-bootable.qcow2 artifacts_release/omega-x86_64.qcow2
+          cp disk_images/omega-x86_64-bootable.vmdk artifacts_release/omega-x86_64.vmdk
+          cp disk_images/omega-x86_64-bootable.vdi artifacts_release/omega-x86_64.vdi
           
-          cp disk_images/omega-aarch64-bootable.img artifacts_release/omega-${VER}-aarch64.img
-          cp disk_images/omega-aarch64-bootable.qcow2 artifacts_release/omega-${VER}-aarch64.qcow2
-          cp disk_images/omega-aarch64-bootable.vmdk artifacts_release/omega-${VER}-aarch64.vmdk
-          cp disk_images/omega-aarch64-bootable.vdi artifacts_release/omega-${VER}-aarch64.vdi
+          cp disk_images/omega-aarch64-bootable.img artifacts_release/omega-aarch64.img
+          cp disk_images/omega-aarch64-bootable.qcow2 artifacts_release/omega-aarch64.qcow2
+          cp disk_images/omega-aarch64-bootable.vmdk artifacts_release/omega-aarch64.vmdk
+          cp disk_images/omega-aarch64-bootable.vdi artifacts_release/omega-aarch64.vdi
           
-          cp disk_images/omega-riscv64-bootable.img artifacts_release/omega-${VER}-riscv64.img
-          cp disk_images/omega-riscv64-bootable.qcow2 artifacts_release/omega-${VER}-riscv64.qcow2
-          cp disk_images/omega-riscv64-bootable.vmdk artifacts_release/omega-${VER}-riscv64.vmdk
-          cp disk_images/omega-riscv64-bootable.vdi artifacts_release/omega-${VER}-riscv64.vdi
+          cp disk_images/omega-riscv64-bootable.img artifacts_release/omega-riscv64.img
+          cp disk_images/omega-riscv64-bootable.qcow2 artifacts_release/omega-riscv64.qcow2
+          cp disk_images/omega-riscv64-bootable.vmdk artifacts_release/omega-riscv64.vmdk
+          cp disk_images/omega-riscv64-bootable.vdi artifacts_release/omega-riscv64.vdi
 
       - name: Run Bootable Disk Image Verification Test Suite
         run: |
@@ -118,15 +117,16 @@ jobs:
           name: omega-${{ env.SYS_VERSION }}
           path: artifacts_release/
 
-      - name: Publish Official GitHub Release & Attach Binary Assets
+      - name: Publish Official GitHub Release
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.SYS_VERSION }}
-          name: Omega OS Release ${{ env.SYS_VERSION }}
+          name: Omega OS ${{ env.SYS_VERSION }}
           body: |
-            Automated Official Release of **Omega Kernel ${{ env.SYS_VERSION }}**.
-            Includes versioned kernel ELF binaries and bootable disk images (RAW, QCOW2, VMDK, VDI) for x86_64, AArch64, and RISC-V 64 architectures.
+            Official Release **Omega OS ${{ env.SYS_VERSION }}**
+            
+            Includes pre-compiled microkernel binaries and bootable disk images across x86_64, AArch64, and RISC-V 64 target architectures.
           files: artifacts_release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
