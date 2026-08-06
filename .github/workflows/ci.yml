@@ -15,6 +15,12 @@ jobs:
       options: --user root
 
     steps:
+      - name: Install Git & Basic Tools
+        run: apk add --no-cache git bash
+
+      - name: Mark Workspace as Safe Git Directory
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
@@ -22,13 +28,14 @@ jobs:
 
       - name: Install Build Dependencies & Toolchains
         run: |
-          apk add --no-cache bash build-base cmake ninja clang17 llvm17 lld qemu-system-x86_64 qemu-system-aarch64 qemu-system-riscv64 qemu-img mtools dosfstools xorriso tcl tk git make
+          apk add --no-cache build-base cmake ninja clang17 llvm17 lld qemu-system-x86_64 qemu-system-aarch64 qemu-system-riscv64 qemu-img mtools dosfstools xorriso tcl tk make
 
       - name: Auto Increment Patch Version
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           
           if [ -f VERSION ]; then
               CUR_VER=$(cat VERSION | tr -d 'v=')
