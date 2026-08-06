@@ -41,6 +41,7 @@ set(KERNEL_SOURCES
     kernel/sys/syscall.cpp
     kernel/sys/vfs.cpp
     kernel/sys/initrd.cpp
+    kernel/sys/userland.cpp
 )
 
 if(ARCH STREQUAL "x86_64")
