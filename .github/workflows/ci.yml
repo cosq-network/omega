@@ -30,12 +30,15 @@ jobs:
         run: |
           apk add --no-cache build-base cmake ninja clang17 llvm17 lld qemu-system-x86_64 qemu-system-aarch64 qemu-system-riscv64 qemu-img mtools dosfstools xorriso tcl tk make
 
-      - name: Auto Increment Patch Version
+      - name: Auto Increment Patch Version & Generate Release Changelog
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          
+          # Retrieve previous tag if available
+          PREV_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
           
           if [ -f VERSION ]; then
               RAW_VER=$(cat VERSION | tr -d ' \n')
@@ -45,13 +48,30 @@ jobs:
           fi
           
           NEW_VER=$(echo $CUR_VER | awk -F. '{$NF = $NF + 1; print $1"."$2"."$3}')
+          NEW_TAG="v${NEW_VER}"
+          
+          # Generate Changelog from PREV_TAG to HEAD
+          echo "## 🚀 Release Changelog (${NEW_TAG})" > RELEASE_NOTES.md
+          echo "" >> RELEASE_NOTES.md
+          if [ -n "$PREV_TAG" ]; then
+              echo "### Changes since ${PREV_TAG}:" >> RELEASE_NOTES.md
+              git log ${PREV_TAG}..HEAD --oneline --no-merges | sed 's/^/- /' >> RELEASE_NOTES.md
+          else
+              echo "### Initial Release Changes:" >> RELEASE_NOTES.md
+              git log -n 20 --oneline --no-merges | sed 's/^/- /' >> RELEASE_NOTES.md
+          fi
+          echo "" >> RELEASE_NOTES.md
+          echo "### Supported Target Architectures:" >> RELEASE_NOTES.md
+          echo "- **x86_64 (AMD64)**: 64-bit Long Mode, PML4 Paging, Xen PVH" >> RELEASE_NOTES.md
+          echo "- **AArch64 (ARM64)**: EL1 Mode, VBAR_EL1 Exception Vector Table" >> RELEASE_NOTES.md
+          echo "- **RISC-V 64 (rv64gc)**: S-Mode, Sv39 Paging, stvec, OpenSBI Console" >> RELEASE_NOTES.md
           
           echo "${NEW_VER}" > VERSION
           echo "Bumping version from ${CUR_VER} to ${NEW_VER}"
           
           git add VERSION
           git commit -m "chore(version): bump version to v${NEW_VER} [skip ci]" || true
-          git tag "v${NEW_VER}" || true
+          git tag "${NEW_TAG}" || true
           git push origin main --tags || true
 
       - name: Read Current Version String
@@ -124,10 +144,7 @@ jobs:
         with:
           tag_name: ${{ env.SYS_VERSION }}
           name: Omega OS ${{ env.SYS_VERSION }}
-          body: |
-            Official Release **Omega OS ${{ env.SYS_VERSION }}**
-            
-            Includes pre-compiled microkernel binaries and bootable disk images across x86_64, AArch64, and RISC-V 64 target architectures.
+          body_path: RELEASE_NOTES.md
           files: artifacts_release/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
