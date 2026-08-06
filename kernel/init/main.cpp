@@ -13,6 +13,9 @@
 #include "arch/interrupts.hpp"
 #include "arch/pci.hpp"
 
+// Static Heap Allocation Buffer (1 MB) to guarantee physical memory availability across architectures
+static uint8_t kernel_heap_buffer[1024 * 1024] __attribute__((aligned(8)));
+
 // Synthetic Minimal ELF Header for Testing
 static const uint8_t mock_elf_binary[] __attribute__((aligned(8))) = {
     0x7F, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, // e_ident (64-bit)
@@ -55,6 +58,8 @@ extern "C" void kernel_main() {
     kernel::kprintf("[+] Architecture Identified: x86_64 (64-bit)\n");
 #elif defined(__aarch64__)
     kernel::kprintf("[+] Architecture Identified: AArch64 (ARM 64-bit)\n");
+#elif defined(__riscv)
+    kernel::kprintf("[+] Architecture Identified: RISC-V 64-bit (rv64gc)\n");
 #else
     kernel::kprintf("[!] Architecture: Unknown\n");
 #endif
@@ -65,8 +70,8 @@ extern "C" void kernel_main() {
     // Initialize Virtual Memory Manager
     memory::VirtualMemoryManager::init();
 
-    // Initialize Heap Allocator (1MB Heap Buffer at 0x500000)
-    memory::HeapAllocator::init(0x500000, 1024 * 1024);
+    // Initialize Heap Allocator using static kernel heap buffer
+    memory::HeapAllocator::init(reinterpret_cast<uintptr_t>(kernel_heap_buffer), sizeof(kernel_heap_buffer));
 
     // Initialize Hardware Interrupt System
     hal::interrupts_init();

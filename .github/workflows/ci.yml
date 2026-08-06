@@ -1,0 +1,125 @@
+name: Omega Kernel CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    container:
+      image: alpine:3.19
+      options: --user root
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install Build Dependencies & Toolchains
+        run: |
+          apk add --no-cache bash build-base cmake ninja clang17 llvm17 lld qemu-system-x86_64 qemu-system-aarch64 qemu-system-riscv64 qemu-img mtools dosfstools xorriso tcl tk git make
+
+      - name: Auto Increment Patch Version
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          if [ -f VERSION ]; then
+              CUR_VER=$(cat VERSION | tr -d 'v=')
+          else
+              CUR_VER="0.0.1"
+          fi
+          
+          NEW_VER=$(echo $CUR_VER | awk -F. '{$NF = $NF + 1; print $1"."$2"."$3}')
+          NEW_TAG="v${NEW_VER}"
+          
+          echo "VERSION=v${NEW_VER}" > VERSION
+          echo "Bumping version to ${NEW_TAG}"
+          
+          git add VERSION
+          git commit -m "chore(version): bump version to ${NEW_TAG} [skip ci]" || true
+          git tag "${NEW_TAG}" || true
+          git push origin main --tags || true
+
+      - name: Read Current Version String
+        id: get_version
+        run: |
+          VER=$(cat VERSION | tr -d ' \n')
+          echo "SYS_VERSION=${VER}" >> $GITHUB_ENV
+          echo "System Version Identified: ${VER}"
+
+      - name: Run Multi-Arch QEMU Kernel Integration Tests
+        run: |
+          chmod +x scripts/test.sh
+          ./scripts/test.sh
+
+      - name: Generate Bootable Disk Images (RAW, QCOW2, VMDK, VDI)
+        run: |
+          chmod +x scripts/create_bootable_disk.sh
+          ./scripts/create_bootable_disk.sh
+
+      - name: Package Versioned Kernel Artifacts & Disk Images
+        run: |
+          mkdir -p artifacts_release
+          VER=${SYS_VERSION}
+          
+          # Copy Versioned Kernel Binaries
+          cp build/x86_64/omega.elf artifacts_release/omega-${VER}-x86_64.elf
+          cp build/aarch64/omega.elf artifacts_release/omega-${VER}-aarch64.elf
+          cp build/riscv64/omega.elf artifacts_release/omega-${VER}-riscv64.elf
+          
+          # Copy & Rename Versioned Disk Images
+          cp disk_images/omega-x86_64-bootable.img artifacts_release/omega-${VER}-x86_64.img
+          cp disk_images/omega-x86_64-bootable.qcow2 artifacts_release/omega-${VER}-x86_64.qcow2
+          cp disk_images/omega-x86_64-bootable.vmdk artifacts_release/omega-${VER}-x86_64.vmdk
+          cp disk_images/omega-x86_64-bootable.vdi artifacts_release/omega-${VER}-x86_64.vdi
+          
+          cp disk_images/omega-aarch64-bootable.img artifacts_release/omega-${VER}-aarch64.img
+          cp disk_images/omega-aarch64-bootable.qcow2 artifacts_release/omega-${VER}-aarch64.qcow2
+          cp disk_images/omega-aarch64-bootable.vmdk artifacts_release/omega-${VER}-aarch64.vmdk
+          cp disk_images/omega-aarch64-bootable.vdi artifacts_release/omega-${VER}-aarch64.vdi
+          
+          cp disk_images/omega-riscv64-bootable.img artifacts_release/omega-${VER}-riscv64.img
+          cp disk_images/omega-riscv64-bootable.qcow2 artifacts_release/omega-${VER}-riscv64.qcow2
+          cp disk_images/omega-riscv64-bootable.vmdk artifacts_release/omega-${VER}-riscv64.vmdk
+          cp disk_images/omega-riscv64-bootable.vdi artifacts_release/omega-${VER}-riscv64.vdi
+
+      - name: Run Bootable Disk Image Verification Test Suite
+        run: |
+          chmod +x scripts/test_disk_images.sh
+          ./scripts/test_disk_images.sh
+
+      - name: Run Omega Virtual Device (OVD) Integration Tests
+        run: |
+          chmod +x emulator/test_ovd.sh
+          ./emulator/test_ovd.sh
+
+      - name: Run OVD Tcl/Tk GUI Unit Tests
+        run: |
+          chmod +x emulator/test_ovd_gui.tcl
+          tclsh emulator/test_ovd_gui.tcl
+
+      - name: Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: omega-${{ env.SYS_VERSION }}-release-artifacts
+          path: artifacts_release/
+
+      - name: Publish Official GitHub Release & Attach Binary Assets
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.SYS_VERSION }}
+          name: Omega OS Release ${{ env.SYS_VERSION }}
+          body: |
+            Automated Official Release of **Omega Kernel ${{ env.SYS_VERSION }}**.
+            Includes versioned kernel ELF binaries and bootable disk images (RAW, QCOW2, VMDK, VDI) for x86_64, AArch64, and RISC-V 64 architectures.
+          files: artifacts_release/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

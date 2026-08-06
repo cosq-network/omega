@@ -1,0 +1,10 @@
+.git
+build/
+disk_images/
+emulator/ovd/
+*.log
+*.elf
+*.img
+*.qcow2
+*.vmdk
+*.vdi
