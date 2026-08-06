@@ -115,7 +115,7 @@ jobs:
       - name: Upload Build Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: omega-${{ env.SYS_VERSION }}-release-artifacts
+          name: omega-${{ env.SYS_VERSION }}
           path: artifacts_release/
 
       - name: Publish Official GitHub Release & Attach Binary Assets
