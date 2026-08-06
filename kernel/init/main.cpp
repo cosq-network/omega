@@ -10,6 +10,7 @@
 #include "kernel/elf_loader.hpp"
 #include "arch/uart.hpp"
 #include "arch/interrupts.hpp"
+#include "arch/pci.hpp"
 
 // Synthetic Minimal ELF Header for Testing
 static const uint8_t mock_elf_binary[] __attribute__((aligned(8))) = {
@@ -81,16 +82,11 @@ extern "C" void kernel_main() {
     // Initialize Initrd RAM Disk at 0x600000
     initrd::Initrd::init(0x600000);
 
+    // Scan PCI Bus Devices
+    hal::PciBus::scan();
+
     // Initialize Userland Privilege System
     userland::UserlandManager::init();
-
-    // Test POSIX System Calls (sys_open, sys_fork, sys_execve, sys_close)
-    const char path[] = "/";
-    int fd = static_cast<int>(sys_call(syscall::SYS_OPEN, reinterpret_cast<uint64_t>(path), 0, 0));
-    sys_call(syscall::SYS_FORK, 0, 0, 0);
-    const char app[] = "/bin/init";
-    sys_call(syscall::SYS_EXECVE, reinterpret_cast<uint64_t>(app), 0, 0);
-    sys_call(syscall::SYS_CLOSE, fd, 0, 0);
 
     // Parse and Load ELF Binary
     uintptr_t elf_entry = elf::ElfLoader::load(mock_elf_binary);

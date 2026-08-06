@@ -51,6 +51,7 @@ if(ARCH STREQUAL "x86_64")
         kernel/arch/x86_64/boot.s
         kernel/arch/x86_64/serial.cpp
         kernel/arch/x86_64/idt.cpp
+        kernel/arch/x86_64/pci.cpp
     )
 elseif(ARCH STREQUAL "aarch64")
     set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/kernel/arch/aarch64/linker.ld")
@@ -59,6 +60,7 @@ elseif(ARCH STREQUAL "aarch64")
         kernel/arch/aarch64/vectors.s
         kernel/arch/aarch64/uart.cpp
         kernel/arch/aarch64/gic.cpp
+        kernel/arch/aarch64/pci.cpp
     )
 else()
     message(FATAL_ERROR "Unsupported Architecture: ${ARCH}. Choose x86_64 or aarch64.")
