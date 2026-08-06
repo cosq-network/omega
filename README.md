@@ -26,6 +26,7 @@
 - **Firmware & Bootloader Compatibility**: Compatible with **UEFI/GPT**, **U-Boot** (`bootefi` / `booti`), and **Coreboot** (TianoCore / GRUB).
 - **Multi-Format Virtual Disk Image Generator**: Generates RAW (`.img`), QCOW2 (`.qcow2`), VMDK (`.vmdk`), and VDI (`.vdi`) disk images with embedded FAT32 payloads (`/EFI/BOOT/` and `/boot/omega.elf`).
 - **Omega Virtual Device (OVD) Manager & GUI**: Android-like virtual device manager CLI (`emulator/ovd_manager.sh`), launcher script (`emulator/ovd_run.sh`), and Tcl/Tk GUI application (`emulator/ovd_gui.tcl`).
+- **Containerization & CI/CD**: Minimal Alpine-based `Dockerfile`, VSCode DevContainers/Codespaces (`.devcontainer/devcontainer.json`), and GitHub Actions CI/CD (`.github/workflows/ci.yml`).
 
 ---
 
@@ -51,6 +52,9 @@
 
 ```text
 omega/
+├── Dockerfile                     # Minimal Alpine-based cross-compilation environment
+├── .devcontainer/                 # VSCode DevContainers and GitHub Codespaces configuration
+├── .github/workflows/ci.yml       # GitHub Actions Multi-Arch CI/CD Pipeline
 ├── CMakeLists.txt                 # Master CMake cross-compilation target script
 ├── cmake/
 │   ├── x86_64-toolchain.cmake     # x86_64 toolchain configuration
@@ -62,7 +66,7 @@ omega/
 │   ├── ABI.md                     # System Call ABI Specification
 │   ├── FIRMWARE_BOOT.md           # U-Boot & Coreboot Firmware Compatibility
 │   ├── RISCV64_PLAN.md            # RISC-V 64 Architectural Plan
-│   ├── ROADMAP.md                 # Multi-Phase Implementation Plan
+│   ├── ROADMAP.md                 # Multi-Phase Implementation Roadmap
 │   ├── RUNNING.md                 # QEMU Execution & Build Guide
 │   └── COMPLETION_REPORT.md       # Final Verification Report
 ├── emulator/
@@ -101,17 +105,26 @@ mkdir -p build/aarch64 && cd build/aarch64 && cmake -DCMAKE_TOOLCHAIN_FILE=../..
 mkdir -p build/riscv64 && cd build/riscv64 && cmake -DCMAKE_TOOLCHAIN_FILE=../../cmake/riscv64-toolchain.cmake -DARCH=riscv64 ../.. && make
 ```
 
-### 2. Generate Bootable Virtual Disk Images
+### 2. Run Containerized Development Environment (Docker / DevContainers)
+```bash
+# Build Docker image
+docker build -t omega-dev .
+
+# Run interactive container
+docker run -it --rm -v $(pwd):/workspace omega-dev
+```
+
+### 3. Generate Bootable Virtual Disk Images
 ```bash
 ./scripts/create_bootable_disk.sh
 ```
 
-### 3. Run Omega Virtual Device (OVD) Manager GUI
+### 4. Run Omega Virtual Device (OVD) Manager GUI
 ```bash
 ./emulator/ovd_gui.tcl
 ```
 
-### 4. Run Automated Test Suites
+### 5. Run Automated Test Suites
 ```bash
 ./scripts/test.sh              # QEMU Kernel Integration Tests
 ./scripts/test_disk_images.sh   # Bootable Disk Image Tests
