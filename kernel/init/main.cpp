@@ -72,7 +72,7 @@ extern "C" void kernel_main() {
     // Initialize Preemptive Thread Scheduler
     scheduler::Scheduler::init();
 
-    // Initialize System Call Engine
+    // Initialize System Call Engine & POSIX Surface
     syscall::SyscallDispatcher::init();
 
     // Initialize Virtual Filesystem (VFS)
@@ -83,6 +83,14 @@ extern "C" void kernel_main() {
 
     // Initialize Userland Privilege System
     userland::UserlandManager::init();
+
+    // Test POSIX System Calls (sys_open, sys_fork, sys_execve, sys_close)
+    const char path[] = "/";
+    int fd = static_cast<int>(sys_call(syscall::SYS_OPEN, reinterpret_cast<uint64_t>(path), 0, 0));
+    sys_call(syscall::SYS_FORK, 0, 0, 0);
+    const char app[] = "/bin/init";
+    sys_call(syscall::SYS_EXECVE, reinterpret_cast<uint64_t>(app), 0, 0);
+    sys_call(syscall::SYS_CLOSE, fd, 0, 0);
 
     // Parse and Load ELF Binary
     uintptr_t elf_entry = elf::ElfLoader::load(mock_elf_binary);

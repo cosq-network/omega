@@ -6,9 +6,14 @@
 namespace syscall {
 
 enum SyscallNumber {
-    SYS_YIELD = 1,
-    SYS_WRITE = 2,
-    SYS_EXIT  = 3,
+    SYS_YIELD  = 1,
+    SYS_WRITE  = 2,
+    SYS_EXIT   = 3,
+    SYS_OPEN   = 4,
+    SYS_READ   = 5,
+    SYS_CLOSE  = 6,
+    SYS_FORK   = 7,
+    SYS_EXECVE = 8,
 };
 
 class SyscallDispatcher {
