@@ -46,3 +46,9 @@ jobs:
         run: |
           chmod +x emulator/test_ovd_gui.tcl
           tclsh emulator/test_ovd_gui.tcl
+
+      - name: Upload Generated Bootable Disk Images Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: omega-bootable-disk-images
+          path: disk_images/
