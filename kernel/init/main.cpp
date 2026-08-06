@@ -8,6 +8,7 @@
 #include "kernel/initrd.hpp"
 #include "kernel/userland.hpp"
 #include "kernel/elf_loader.hpp"
+#include "kernel/net.hpp"
 #include "arch/uart.hpp"
 #include "arch/interrupts.hpp"
 #include "arch/pci.hpp"
@@ -84,6 +85,9 @@ extern "C" void kernel_main() {
 
     // Scan PCI Bus Devices
     hal::PciBus::scan();
+
+    // Initialize VirtIO Network Stack
+    net::NetworkStack::init();
 
     // Initialize Userland Privilege System
     userland::UserlandManager::init();
