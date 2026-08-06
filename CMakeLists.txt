@@ -42,6 +42,7 @@ set(KERNEL_SOURCES
     kernel/sys/vfs.cpp
     kernel/sys/initrd.cpp
     kernel/sys/userland.cpp
+    kernel/sys/elf_loader.cpp
 )
 
 if(ARCH STREQUAL "x86_64")

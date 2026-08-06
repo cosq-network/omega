@@ -1,6 +1,12 @@
 #include "kernel/userland.hpp"
 #include "kernel/kprint.hpp"
 
+extern "C" void jump_to_userland(uintptr_t user_entry, uintptr_t user_stack) {
+    (void)user_stack;
+    auto fn = reinterpret_cast<void(*)()>(user_entry);
+    fn();
+}
+
 namespace userland {
 
 void UserlandManager::init() {

@@ -7,21 +7,34 @@
 #include "kernel/vfs.hpp"
 #include "kernel/initrd.hpp"
 #include "kernel/userland.hpp"
+#include "kernel/elf_loader.hpp"
 #include "arch/uart.hpp"
 #include "arch/interrupts.hpp"
 
-static void simulated_user_program() {
-    const char msg[] = "    [Userland Application] Hello from Ring 3 / EL0!\n";
-    sys_call(syscall::SYS_WRITE, reinterpret_cast<uint64_t>(msg), sizeof(msg) - 1, 0);
-    sys_call(syscall::SYS_EXIT, 0, 0, 0);
-}
-
-extern "C" void jump_to_userland(uintptr_t user_entry, uintptr_t user_stack) {
-    (void)user_stack;
-    // Execute simulated userland program entry point
-    auto fn = reinterpret_cast<void(*)()>(user_entry);
-    fn();
-}
+// Synthetic Minimal ELF Header for Testing
+static const uint8_t mock_elf_binary[] __attribute__((aligned(8))) = {
+    0x7F, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, // e_ident (64-bit)
+    2, 0,                                                   // e_type (EXEC)
+    62, 0,                                                  // e_machine (x86_64)
+    1, 0, 0, 0,                                             // e_version
+    0x00, 0x10, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,         // e_entry (0x401000)
+    0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,         // e_phoff (64)
+    0, 0, 0, 0, 0, 0, 0, 0,                                 // e_shoff
+    0, 0, 0, 0,                                             // e_flags
+    64, 0,                                                  // e_ehsize
+    56, 0,                                                  // e_phentsize
+    1, 0,                                                   // e_phnum (1 segment)
+    0, 0, 0, 0, 0, 0,                                       // section sizes
+    // Program Header (PT_LOAD)
+    1, 0, 0, 0,                                             // p_type (PT_LOAD)
+    5, 0, 0, 0,                                             // p_flags (R+X)
+    0, 0, 0, 0, 0, 0, 0, 0,                                 // p_offset
+    0x00, 0x10, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,         // p_vaddr (0x401000)
+    0x00, 0x10, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,         // p_paddr
+    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,         // p_filesz (128B)
+    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,         // p_memsz (128B)
+    0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00          // p_align (4KiB)
+};
 
 extern "C" void kernel_main() {
     // Initialize UART hardware
@@ -71,9 +84,11 @@ extern "C" void kernel_main() {
     // Initialize Userland Privilege System
     userland::UserlandManager::init();
 
-    // Test Jump to Userland Execution Space
-    uintptr_t user_stack = reinterpret_cast<uintptr_t>(kmalloc(16384)) + 16384;
-    userland::UserlandManager::enter_userland(reinterpret_cast<uintptr_t>(simulated_user_program), user_stack);
+    // Parse and Load ELF Binary
+    uintptr_t elf_entry = elf::ElfLoader::load(mock_elf_binary);
+    if (elf_entry) {
+        kernel::kprintf("[+] ELF Executable Binary Successfully Parsed & Loaded!\n");
+    }
 
     kernel::kprintf("[+] System online. Entering idle loop...\n");
 
