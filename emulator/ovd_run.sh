@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # Omega Virtual Device (OVD) Launcher Script
-# x86_64: Standard VGA (Bochs VBE) with optional SDL/Cocoa window or headless serial console
-# AArch64 / RISC-V: serial console only (display HAL stubs until Phase 9)
+# x86_64: Standard VGA (Bochs VBE) with optional SDL/Cocoa window or headless console
+# AArch64 / RISC-V: SimpleFb/serial fallback; --gpu requests experimental VirtIO-GPU
 
 set -e
 
@@ -18,8 +18,8 @@ BUILD_DIR="${PROJECT_ROOT}/build"
 usage() {
     echo "Usage: $0 run --name <ovd_name> [--gpu|--no-gpu]"
     echo ""
-    echo "  --gpu     x86_64: -vga std with a GUI window (SDL on Linux, Cocoa on macOS)"
-    echo "  --no-gpu  x86_64: -vga std -display none (Bochs VBE headless, serial log)"
+    echo "  --gpu     x86_64: Standard VGA GUI; ARM/RISC-V: experimental virtio-gpu request"
+    echo "  --no-gpu  headless boot; ARM/RISC-V use SimpleFb when handed off, else serial fallback"
     exit 1
 }
 
@@ -98,6 +98,14 @@ resolve_x86_display_backend() {
     esac
 }
 
+resolve_gui_backend() {
+    case "$(uname -s)" in
+        Darwin) echo "cocoa" ;;
+        Linux)  [ -n "${DISPLAY:-}" ] && echo "sdl" || echo "none" ;;
+        *)      echo "none" ;;
+    esac
+}
+
 case "${ARCH}" in
     x86_64)
         QEMU_ARGS=(
@@ -117,20 +125,32 @@ case "${ARCH}" in
         ;;
 
     aarch64)
-        echo "[*] AArch64: serial console (display HAL stub — no VGA)"
-        exec qemu-system-aarch64 \
-            -M virt -cpu cortex-a57 \
-            -m "${RAM}" \
+        if [ "${GPU}" = true ]; then
+            DISPLAY_BACKEND="$(resolve_gui_backend)"
+            echo "[*] AArch64: experimental VirtIO-GPU request (${DISPLAY_BACKEND}); kernel falls back safely if unavailable"
+            exec qemu-system-aarch64 -M virt -cpu cortex-a57 -m "${RAM}" \
+                -kernel "${KERNEL_ELF}" \
+                -drive "file=${OVD_PATH}/userdata.img,format=raw,index=0,media=disk" \
+                -serial stdio -device virtio-gpu-pci -display "${DISPLAY_BACKEND}"
+        fi
+        echo "[*] AArch64: SimpleFb if firmware provides a DT framebuffer; otherwise serial fallback"
+        exec qemu-system-aarch64 -M virt -cpu cortex-a57 -m "${RAM}" \
             -kernel "${KERNEL_ELF}" \
             -drive "file=${OVD_PATH}/userdata.img,format=raw,index=0,media=disk" \
             -nographic
         ;;
 
     riscv64)
-        echo "[*] RISC-V 64: serial console (display HAL stub — no VGA)"
-        exec qemu-system-riscv64 \
-            -M virt -cpu rv64 -bios default \
-            -m "${RAM}" \
+        if [ "${GPU}" = true ]; then
+            DISPLAY_BACKEND="$(resolve_gui_backend)"
+            echo "[*] RISC-V 64: experimental VirtIO-GPU request (${DISPLAY_BACKEND}); kernel falls back safely if unavailable"
+            exec qemu-system-riscv64 -M virt -cpu rv64 -bios default -m "${RAM}" \
+                -kernel "${KERNEL_ELF}" \
+                -drive "file=${OVD_PATH}/userdata.img,format=raw,index=0,media=disk" \
+                -serial stdio -device virtio-gpu-pci -display "${DISPLAY_BACKEND}"
+        fi
+        echo "[*] RISC-V 64: SimpleFb if firmware provides a DT framebuffer; otherwise serial fallback"
+        exec qemu-system-riscv64 -M virt -cpu rv64 -bios default -m "${RAM}" \
             -kernel "${KERNEL_ELF}" \
             -drive "file=${OVD_PATH}/userdata.img,format=raw,index=0,media=disk" \
             -nographic

@@ -51,7 +51,8 @@ run_ovd_test() {
         exit 1
     fi
 
-    # 3. Test Headless OVD Execution (--no-gpu on x86_64 selects -vga std -display none)
+    # 3. Test headless OVD execution. ARM/RISC-V exercise the SimpleFb/serial
+    # fallback path; x86_64 exercises Standard VGA/Bochs VBE.
     echo "[*] Testing Headless OVD Execution..."
     local log_file="${PROJECT_ROOT}/emulator/${name}_test.log"
     rm -f "${log_file}"
@@ -64,6 +65,9 @@ run_ovd_test() {
 
     if [ "${arch}" = "riscv64" ]; then
         assert_log_contains "${log_file}" "OpenSBI"
+        assert_log_contains "${log_file}" "Welcome to Omega Kernel"
+        assert_log_contains "${log_file}" "Display: No framebuffer backend found"
+        assert_log_contains "${log_file}" "Display console write path"
         echo -e "  [PASS] Headless OVD Execution Verified for '${name}'."
     elif [ "${arch}" = "x86_64" ]; then
         assert_log_contains "${log_file}" "Welcome to Omega Kernel"
@@ -73,6 +77,8 @@ run_ovd_test() {
         echo -e "  [PASS] Headless OVD Execution Verified for '${name}' (VGA/Bochs VBE)."
     else
         assert_log_contains "${log_file}" "Welcome to Omega Kernel"
+        assert_log_contains "${log_file}" "Display: No framebuffer backend found"
+        assert_log_contains "${log_file}" "Display console write path"
         echo -e "  [PASS] Headless OVD Execution Verified for '${name}'."
     fi
 

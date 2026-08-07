@@ -6,6 +6,7 @@ SECTIONS
 
     .text : ALIGN(4K)
     {
+        KEEP(*(.text.boot))
         *(.text)
     }
 
@@ -23,5 +24,10 @@ SECTIONS
     {
         *(COMMON)
         *(.bss)
+    }
+
+    .boot_stack (NOLOAD) : ALIGN(16)
+    {
+        *(.boot_stack)
     }
 }

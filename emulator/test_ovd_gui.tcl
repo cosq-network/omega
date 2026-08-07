@@ -21,6 +21,15 @@ test test_ovd_run_vga_config {Verify ovd_run.sh configures Standard VGA for x86_
     string match {*-vga std*} $content
 } -result {1}
 
+test test_ovd_run_non_x86_display_config {Verify non-x86 display fallback and experimental GPU paths} -body {
+    set fp [open $RUN_SCRIPT r]
+    set content [read $fp]
+    close $fp
+    set has_simplefb [string match "*SimpleFb*" $content]
+    set has_virtio_gpu [string match "*-device virtio-gpu-pci*" $content]
+    expr {$has_simplefb && $has_virtio_gpu}
+} -result {1}
+
 test test_gui_script_syntax {Verify ovd_gui.tcl syntax correctness} -body {
     set fp [open $GUI_SCRIPT r]
     set content [read $fp]

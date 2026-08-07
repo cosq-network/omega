@@ -10,6 +10,8 @@ enum class DisplayBackend : uint8_t {
     VgaText,
     BochsVbe,
     BootFramebuffer,
+    SimpleFb,
+    VirtioGpu,
 };
 
 struct FramebufferInfo {
@@ -22,11 +24,16 @@ struct FramebufferInfo {
     uint8_t   red_mask;
     uint8_t   green_mask;
     uint8_t   blue_mask;
+    uint8_t   red_shift;
+    uint8_t   green_shift;
+    uint8_t   blue_shift;
 };
 
-struct DisplayCapabilities {
-    bool text_mode;
-    bool linear_framebuffer;
+struct alignas(8) DisplayCapabilities {
+    // Keep the value naturally aligned for freestanding AArch64/RISC-V code;
+    // packed bool aggregates can trigger unaligned stack accesses.
+    uint32_t text_mode;
+    uint32_t linear_framebuffer;
 };
 
 class Display {

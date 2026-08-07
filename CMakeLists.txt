@@ -47,6 +47,7 @@ set(KERNEL_SOURCES
     kernel/sys/framebuffer.cpp
     kernel/sys/font.cpp
     kernel/sys/display_console.cpp
+    kernel/sys/fdt.cpp
 )
 
 if(ARCH STREQUAL "x86_64")
@@ -71,7 +72,7 @@ elseif(ARCH STREQUAL "aarch64")
         kernel/arch/aarch64/uart.cpp
         kernel/arch/aarch64/gic.cpp
         kernel/arch/aarch64/pci.cpp
-        kernel/arch/aarch64/display_stub.cpp
+        kernel/arch/aarch64/display.cpp
     )
 elseif(ARCH STREQUAL "riscv64")
     set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/kernel/arch/riscv64/linker.ld")
@@ -81,7 +82,7 @@ elseif(ARCH STREQUAL "riscv64")
         kernel/arch/riscv64/uart.cpp
         kernel/arch/riscv64/plic.cpp
         kernel/arch/riscv64/pci.cpp
-        kernel/arch/riscv64/display_stub.cpp
+        kernel/arch/riscv64/display.cpp
     )
 else()
     message(FATAL_ERROR "Unsupported Architecture: ${ARCH}. Choose x86_64, aarch64, or riscv64.")

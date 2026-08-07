@@ -7,7 +7,7 @@
 | **Target Phase** | Phase 7.2 (QEMU Parity) → Phase 9 (Real Hardware) |
 | **Primary Architecture** | x86_64 (Standard VGA is a PC/AT legacy subsystem) |
 | **Secondary Path** | Multiboot2 / UEFI GOP framebuffer handoff (bootloader-provided) |
-| **Related Roadmap Items** | Phase 7.2, Phase 9.2 (Framebuffer/GPU), Phase 10A.1 (Display Server) |
+| **Related Roadmap Items** | Phase 7.2, Phase 7.2b (`docs/DISPLAY_AARCH64_RISCV_PLAN.md`), Phase 9.2 (Framebuffer/GPU), Phase 10A.1 (Display Server) |
 
 ---
 
@@ -61,7 +61,7 @@ The SDM is deliberately layered:
 | **Coreboot + SeaBIOS** | Standard VGA | Text mode + VBE via SeaBIOS handoff |
 | **UEFI (OVMF / TianoCore)** | GOP framebuffer | UEFI GOP info passed via boot params |
 | **Physical PC (Intel/AMD iGPU)** | UEFI GOP primary; legacy VGA behind PCI bridges | GOP handoff; text mode if firmware leaves it active |
-| **AArch64 / RISC-V** | Not VGA | Separate HAL backend (`simplefb`, `virtio-gpu`) — out of scope for this document except HAL interface |
+| **AArch64 / RISC-V** | Not VGA | Separate HAL backend (`simplefb`, `virtio-gpu`) — see **`docs/DISPLAY_AARCH64_RISCV_PLAN.md`** (Phase 7.2b) |
 
 ---
 
@@ -572,6 +572,7 @@ Phase 10B (Tablet)
 | Omega VMM API | `kernel/include/kernel/vmm.hpp` |
 | Omega PCI Scanner | `kernel/arch/x86_64/pci.cpp` |
 | Omega Roadmap Phase 7.2 | `docs/ROADMAP.md` |
+| AArch64 / RISC-V SDM extension | `docs/DISPLAY_AARCH64_RISCV_PLAN.md` |
 
 ---
 

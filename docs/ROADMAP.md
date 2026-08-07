@@ -73,7 +73,7 @@ Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsys
 | :--- | :---: | :--- | :--- | :---: |
 | **Phase 7.1: VirtIO Block Storage** | `PLANNED` | VirtIO-Block PCI/MMIO driver for block read/write I/O | Block device abstraction, read/write path, queue handling | Mount test partition in QEMU |
 | **Phase 7.2: System Display Module (Standard VGA)** | `COMPLETED` | x86_64 VGA text mode, Bochs VBE linear FB, dual serial+display console | `hal::Display`, Bochs DISPI 1024×768×32, 8×16 font, Multiboot2 FB tag, `kprintf` mirroring | `scripts/test_display.sh`, CI, OVD `--gpu` |
-| **Phase 7.2b: VirtIO-GPU / AArch64 Display** | `PLANNED` | Non-x86 display backends (VirtIO-GPU, simplefb, PL111) | VirtIO-GPU driver, AArch64/RISC-V HAL backends | Pixel output on `-device virtio-gpu` |
+| **Phase 7.2b: AArch64 & RISC-V Display** | `IN PROGRESS` | SimpleFb (DT), shared FDT parser, portable framebuffer console; VirtIO-GPU remains planned | FDT walker, DT pointer handoff, `SimpleFb` HALs, boot/linker fixes, serial fallback | `scripts/test_display_aarch64.sh`, QEMU AArch64/RISC-V smoke tests |
 | **Phase 7.3: SMP Multi-Core** | `PLANNED` | Symmetric multiprocessing across all cores | APIC ICR (x86), PSCI (AArch64), OpenSBI IPI (RISC-V); per-CPU run queues | Multi-core boot log, parallel thread execution |
 | **Phase 7.4: Timer-Driven Preemption** | `PLANNED` | Replace cooperative yield with hardware timer preemption | Periodic tick interrupt, preemptive context switch | Latency benchmark under load |
 | **Phase 7.5: Per-Process Address Spaces** | `PLANNED` | Isolated virtual address space per process | Separate page tables per process, kernel/user boundary enforcement | Two processes with distinct mappings |
@@ -93,6 +93,22 @@ The **System Display Module (SDM)** is implemented for PC-class VGA hardware in 
 | **7.2d Hardening & CI** | `COMPLETED` | In-kernel self-tests, `scripts/test_display.sh`, OVD `-vga std` integration |
 
 **Deferred from Phase 7.2:** VirtIO-GPU (→ 7.2b), VMware SVGA, UEFI GOP EFI stub, full ANSI escape subset, SMP display spinlock.
+
+### Phase 7.2b In Progress (AArch64 & RISC-V 64 Display)
+
+Extends the SDM to non-x86 targets using **framebuffer-first** backends (no VGA text mode). The portable console, font, and `kprintf` mirroring layers from Phase 7.2 are reused unchanged. See `docs/DISPLAY_AARCH64_RISCV_PLAN.md` for the full specification.
+
+| Sub-milestone | Status | Deliverable |
+| :--- | :---: | :--- |
+| **7.2b.1 FDT Infrastructure** | `COMPLETED` | Shared `kernel/sys/fdt.cpp` walker; DT pointer capture through AArch64 `x0` and RISC-V OpenSBI `a1` |
+| **7.2b.2 SimpleFb (AArch64)** | `COMPLETED*` | SimpleFb backend, format metadata, shared console routing, safe serial fallback, and pixel self-test path |
+| **7.2b.3 SimpleFb (RISC-V)** | `COMPLETED*` | Correct OpenSBI entry placement, PMM bootstrap storage, display HAL, and portable console integration |
+| **7.2b.4 VirtIO-GPU** | `PLANNED` | Shared `virtio_gpu.cpp`; SET_SCANOUT; OVD `--gpu` on AArch64 |
+| **7.2b.5 CI & Hardening** | `IN PROGRESS` | `scripts/test_display_aarch64.sh`, integration assertions, pixel-format dispatch; real framebuffer CI pending |
+
+\* QEMU's default `virt` configuration in the current environment does not expose a DT `simple-framebuffer` node, so the validated path uses serial fallback; a real DT framebuffer activates the same SimpleFb backend.
+
+**Current state:** AArch64 and RISC-V use real `display.cpp` HALs rather than stubs. Shared display initialization runs on all architectures after PMM/VMM. RISC-V now reaches `kernel_main()` under OpenSBI. The current framebuffer mapping is an identity-map QEMU bring-up path; a full architecture-specific VMM is still required for arbitrary physical framebuffer addresses. VirtIO-GPU remains blocked on PCI/MMIO discovery and a reusable VirtIO queue/transport layer.
 
 ---
 
@@ -341,14 +357,14 @@ Year 4–5      Phase 10C + 11       Phone product, public release, OEM partners
 
 Concrete sequence mapped to the existing codebase:
 
-1. **Complete Phase 7** — VirtIO block, VirtIO-GPU / AArch64 display (7.2b), SMP, timer preemption, per-process VM, IPC. *(Standard VGA display on x86_64 is done — Phase 7.2.)*
+1. **Complete Phase 7** — VirtIO block, **Phase 7.2b display on AArch64/RISC-V** (see `docs/DISPLAY_AARCH64_RISCV_PLAN.md`), SMP, timer preemption, per-process VM, IPC. *(Standard VGA on x86_64 is done — Phase 7.2.)*
 2. **Select first real board** — QEMU `virt` → Raspberry Pi 4/5 → one x86_64 laptop.
 3. **Userspace init process** — Minimal init that spawns a shell over serial (validates ELF loader + syscalls end-to-end).
 4. **IPC + driver framework** — Storage, network, and display as privileged userspace servers.
 5. **Port musl (or minimal libc)** — Expand syscalls to POSIX subset required by libc.
 6. **Extend graphical console** — Scrollback, ANSI colors, userspace compositor path (kernel FB console is in place).
 7. **Freeze v1 ABI** — Document and version the syscall and IPC interfaces (`docs/ABI.md`).
-8. **Extend OVD emulator** — x86_64 Standard VGA (`--gpu` / `--no-gpu`) is wired; add VirtIO-GPU and app-developer workflows.
+8. **Extend OVD emulator** — x86_64 Standard VGA is wired; **Phase 7.2b:** VirtIO-GPU + SimpleFb for AArch64/RISC-V OVD targets.
 9. **Defer phone work** — Until laptop/tablet daily-driver quality is demonstrated.
 
 ---
@@ -380,6 +396,7 @@ Omega's multi-arch HAL, freestanding C++20 runtime, formal syscall ABI, and OVD 
 | `docs/ABI.md` | System call ABI specification |
 | `docs/FIRMWARE_BOOT.md` | UEFI, U-Boot, and Coreboot compatibility |
 | `docs/RUNNING.md` | Build and QEMU execution guide |
-| `docs/VGA_DISPLAY_PLAN.md` | System Display Module — Standard VGA implementation plan |
+| `docs/VGA_DISPLAY_PLAN.md` | System Display Module — x86_64 Standard VGA (Phase 7.2) |
+| `docs/DISPLAY_AARCH64_RISCV_PLAN.md` | System Display Module — AArch64 & RISC-V extension (Phase 7.2b) |
 | `docs/RISCV64_PLAN.md` | RISC-V 64 architectural plan |
 | `docs/COMPLETION_REPORT.md` | Phase 1–6 verification report |

@@ -91,6 +91,10 @@ namespace hal {
     void uart_init();
     void uart_putc(char c);
 
+    // System Display (Phase 7.2 x86_64; Phase 7.2b ARM/RISC-V)
+    // See docs/VGA_DISPLAY_PLAN.md and docs/DISPLAY_AARCH64_RISCV_PLAN.md
+    class Display;  // init(), framebuffer(), text_putc(), run_self_tests()
+
     // CPU & Interrupt Control
     void interrupts_enable();
     void interrupts_disable();

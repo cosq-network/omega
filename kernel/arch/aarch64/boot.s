@@ -1,8 +1,10 @@
-.section .text
+.section .text.boot
 .global _start
 .type _start, %function
 
 _start:
+    /* Preserve the firmware/QEMU DTB pointer from x0 across setup. */
+    mov x19, x0
     /* Mask all interrupts (DAIF) */
     msr daifset, #0xf
 
@@ -49,13 +51,17 @@ _start:
     ldr x0, =stack_top
     mov sp, x0
 
+    /* QEMU/firmware passes the Flattened Device Tree in x0. Preserve it
+       through the early setup and make it available to the display HAL. */
+    mov x0, x19
+
     /* Jump to C++ Kernel Entry Point */
     bl kernel_main
 
 1:  wfe
     b 1b
 
-.section .bss
+.section .boot_stack, "aw", %nobits
 .align 16
 stack_bottom:
     .skip 16384 /* 16 KiB Boot Stack */

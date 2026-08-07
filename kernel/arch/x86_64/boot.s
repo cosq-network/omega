@@ -82,7 +82,7 @@ gdt64_pointer:
     .quad gdt64
 
 /* 32-bit Protected Mode Entry */
-.section .text
+.section .text.boot
 .code32
 .global _start
 .type _start, @function
@@ -169,6 +169,7 @@ long_mode_start:
     mov %ax, %ss
 
     /* Jump to C++ Kernel Main */
+    xor %edi, %edi
     call kernel_main
 
 1:  hlt

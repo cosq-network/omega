@@ -2,7 +2,8 @@
 
 # Omega Kernel Integration Test Suite
 # Tests compiled ELF binaries across x86_64, AArch64, and RISC-V 64 architectures in QEMU.
-# x86_64 runs include System Display Module (Standard VGA / Bochs VBE) verification.
+# x86_64 runs include Standard VGA verification; AArch64/RISC-V runs include
+# SimpleFb-capable HAL and serial-fallback verification.
 
 set -e
 
@@ -100,7 +101,7 @@ run_test "x86_64" \
     "Userland Mode Manager (Ring 3 / EL0) Initialized" \
     "Valid 64-bit ELF Binary Detected"
 
-# 3. AArch64 Integration Test Suite (display HAL stub — serial only)
+# 3. AArch64 Integration Test Suite (framebuffer HAL with serial fallback)
 run_test "aarch64" \
     "qemu-system-aarch64" \
     "-M virt -cpu cortex-a57 -nographic -kernel ${BUILD_DIR}/aarch64/omega.elf" \
@@ -108,6 +109,8 @@ run_test "aarch64" \
     "Architecture Identified: AArch64" \
     "Physical Memory Manager initialized" \
     "Virtual Memory Manager (VMM) initialized" \
+    "Display: No framebuffer backend found" \
+    "Display console write path" \
     "Kernel Heap Allocator initialized" \
     "Preemptive Multi-threading Scheduler Initialized" \
     "POSIX System Call Surface Initialized" \
@@ -118,16 +121,25 @@ run_test "aarch64" \
     "Userland Mode Manager (Ring 3 / EL0) Initialized" \
     "Valid 64-bit ELF Binary Detected"
 
-# 4. RISC-V 64 smoke test (OpenSBI firmware handoff — kernel display is stubbed)
+# 4. RISC-V 64 Integration Test Suite (OpenSBI handoff + framebuffer HAL)
 run_test "riscv64" \
     "qemu-system-riscv64" \
     "-M virt -cpu rv64 -bios default -nographic -kernel ${BUILD_DIR}/riscv64/omega.elf" \
-    "OpenSBI"
+    "OpenSBI" \
+    "Welcome to Omega Kernel" \
+    "Architecture Identified: RISC-V 64-bit" \
+    "Display: No framebuffer backend found" \
+    "Display console write path" \
+    "System online. Entering idle loop"
 
 # 5. VGA Display Module dedicated test matrix (Bochs VBE + VgaText fallback)
 echo -e "\n[*] Running VGA Display Module test suite..."
 chmod +x "${PROJECT_ROOT}/scripts/test_display.sh"
 bash "${PROJECT_ROOT}/scripts/test_display.sh"
+
+echo -e "\n[*] Running AArch64 display HAL test suite..."
+chmod +x "${PROJECT_ROOT}/scripts/test_display_aarch64.sh"
+bash "${PROJECT_ROOT}/scripts/test_display_aarch64.sh"
 
 echo -e "\n${GREEN}=================================================${NC}"
 echo -e "${GREEN}      ALL INTEGRATION TESTS PASSED CLEANLY!       ${NC}"

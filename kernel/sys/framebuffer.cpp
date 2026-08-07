@@ -10,9 +10,9 @@ static uint32_t pack_color(uint8_t r, uint8_t g, uint8_t b) {
         return 0;
     }
     if (active_fb->bpp == 32) {
-        return (static_cast<uint32_t>(r) << 16) |
-               (static_cast<uint32_t>(g) << 8) |
-               static_cast<uint32_t>(b);
+        return (static_cast<uint32_t>(r) << active_fb->red_shift) |
+               (static_cast<uint32_t>(g) << active_fb->green_shift) |
+               (static_cast<uint32_t>(b) << active_fb->blue_shift);
     }
     if (active_fb->bpp == 24) {
         return (static_cast<uint32_t>(r) << 16) |
@@ -20,9 +20,9 @@ static uint32_t pack_color(uint8_t r, uint8_t g, uint8_t b) {
                static_cast<uint32_t>(b);
     }
     if (active_fb->bpp == 16) {
-        const uint16_t rgb565 =
-            static_cast<uint16_t>(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
-        return rgb565;
+        return ((static_cast<uint32_t>(r) >> 3) & active_fb->red_mask) << active_fb->red_shift |
+               ((static_cast<uint32_t>(g) >> (active_fb->green_mask == 0x3F ? 2 : 3)) & active_fb->green_mask) << active_fb->green_shift |
+               ((static_cast<uint32_t>(b) >> 3) & active_fb->blue_mask) << active_fb->blue_shift;
     }
     return r;
 }

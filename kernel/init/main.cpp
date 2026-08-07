@@ -15,9 +15,13 @@
 #include "arch/pci.hpp"
 #include "kernel/console.hpp"
 #include "kernel/framebuffer.hpp"
+#include "kernel/fdt.hpp"
 
 // Static Heap Allocation Buffer (1 MB) to guarantee physical memory availability across architectures
 static uint8_t kernel_heap_buffer[1024 * 1024] __attribute__((aligned(8)));
+#if !defined(__x86_64__)
+static uint8_t pmm_bitmap_buffer[4096] __attribute__((aligned(4096)));
+#endif
 
 // Synthetic Minimal ELF Header for Testing
 static const uint8_t mock_elf_binary[] __attribute__((aligned(8))) = {
@@ -44,20 +48,34 @@ static const uint8_t mock_elf_binary[] __attribute__((aligned(8))) = {
     0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00          // p_align (4KiB)
 };
 
-extern "C" void kernel_main() {
+extern "C" void kernel_main(uintptr_t boot_fdt) {
+    fdt::set_boot_pointer(boot_fdt);
     // Serial first for early trap/debug output before display is ready.
     hal::uart_init();
 
     // PMM/VMM must be ready before framebuffer mapping (may lie above 1 GiB).
+    // The early RISC-V/AArch64 QEMU handoff does not yet establish a broad
+    // physical identity map. Keep the PMM bitmap in kernel-owned RAM until
+    // the real VMM is active; x86 retains its historical low-memory address.
+#if defined(__x86_64__)
     memory::PhysicalMemoryManager::init(0x200000, 32 * 1024 * 1024);
+#else
+    memory::PhysicalMemoryManager::init(reinterpret_cast<uintptr_t>(pmm_bitmap_buffer), 32 * 1024 * 1024);
+#endif
     memory::VirtualMemoryManager::init();
 
-#if defined(__x86_64__)
-    // Standard VGA / Bochs VBE — x86_64 only (other arches use HAL stubs).
+
     hal::Display::init();
     display::Console::init();
     kernel::kprint_enable_console_routing();
-#endif
+    if (hal::Display::capabilities().linear_framebuffer) {
+        const auto* fb = hal::Display::framebuffer();
+        kernel::kprintf("[+] Display: %s %ux%ux%u\n", hal::Display::backend_name(),
+                        fb != nullptr ? fb->width : 0, fb != nullptr ? fb->height : 0,
+                        fb != nullptr ? fb->bpp : 0);
+    } else {
+        kernel::kprintf("[!] Display: No framebuffer backend found (serial only)\n");
+    }
 
     kernel::kprintf("\n==========================================\n");
     kernel::kprintf("      Welcome to Omega Kernel v0.1        \n");
@@ -77,7 +95,6 @@ extern "C" void kernel_main() {
     kernel::kprintf("[!] Architecture: Unknown\n");
 #endif
 
-#if defined(__x86_64__)
     if (!hal::Display::run_self_tests()) {
         kernel::kprintf("[!] Display self-tests reported failures\n");
     }
@@ -91,7 +108,6 @@ extern "C" void kernel_main() {
     } else if (display::framebuffer_active()) {
         kernel::kprintf("[TEST][PASS] Framebuffer draw path\n");
     }
-#endif
 
     // Initialize Heap Allocator using static kernel heap buffer
     memory::HeapAllocator::init(reinterpret_cast<uintptr_t>(kernel_heap_buffer), sizeof(kernel_heap_buffer));

@@ -20,6 +20,7 @@ SECTIONS
     .text ALIGN(4K) :
     {
         *(.multiboot2)
+        KEEP(*(.text.boot))
         *(.text)
     } :text
 

@@ -40,7 +40,7 @@ void kputs(const char* str) {
 }
 
 void kprint_hex(uint64_t val) {
-    const char hex_chars[] = "0123456789ABCDEF";
+    alignas(16) const char hex_chars[] = "0123456789ABCDEF";
     kputs("0x");
     if (val == 0) {
         kputc('0');
