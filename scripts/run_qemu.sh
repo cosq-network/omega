@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+
+# Quick QEMU launcher for Omega x86_64 kernel with Standard VGA support.
+# Usage:
+#   ./scripts/run_qemu.sh              # headless Bochs VBE (-vga std -display none)
+#   ./scripts/run_qemu.sh --gui        # graphical window (SDL/Cocoa)
+#   ./scripts/run_qemu.sh --text       # VGA text mode only (-vga none)
+
+set -e
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BUILD_DIR="${PROJECT_ROOT}/build/x86_64"
+KERNEL="${BUILD_DIR}/omega.elf"
+
+MODE="headless"
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --gui)  MODE="gui"; shift ;;
+        --text) MODE="text"; shift ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
+if [ ! -f "${KERNEL}" ]; then
+    echo "[*] Building x86_64 kernel..."
+    mkdir -p "${BUILD_DIR}"
+    cd "${BUILD_DIR}"
+    cmake -DCMAKE_TOOLCHAIN_FILE=../../cmake/x86_64-toolchain.cmake -DARCH=x86_64 ../.. > /dev/null
+    make > /dev/null
+fi
+
+case "${MODE}" in
+    gui)
+        case "$(uname -s)" in
+            Darwin) DISPLAY_BACKEND="cocoa" ;;
+            *)      DISPLAY_BACKEND="sdl" ;;
+        esac
+        echo "[*] Launching with Standard VGA GUI (${DISPLAY_BACKEND})..."
+        exec qemu-system-x86_64 \
+            -kernel "${KERNEL}" \
+            -serial stdio \
+            -vga std \
+            -display "${DISPLAY_BACKEND}"
+        ;;
+    text)
+        echo "[*] Launching with VGA text mode only (-vga none)..."
+        exec qemu-system-x86_64 \
+            -kernel "${KERNEL}" \
+            -serial stdio \
+            -display none \
+            -vga none
+        ;;
+    headless)
+        echo "[*] Launching headless with Bochs VBE (-vga std -display none)..."
+        exec qemu-system-x86_64 \
+            -kernel "${KERNEL}" \
+            -serial stdio \
+            -display none \
+            -vga std
+        ;;
+esac

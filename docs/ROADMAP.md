@@ -3,9 +3,11 @@
 ## Overview
 This document outlines the multi-phase implementation roadmap for **Omega**—a freestanding, cross-platform microkernel core written in C++20. Omega cross-compiles natively on macOS (Apple Silicon M1/M2/M3) using Clang and LLVM (`ld.lld`) for **x86_64**, **AArch64**, and **RISC-V 64 (`rv64gc`)** architectures.
 
+Phases **1–6** cover the research-kernel foundation (completed). Phases **7–12** describe the realistic path from QEMU-proven subsystems to a **production-grade operating system** suitable for laptops, desktops, tablets, and phones.
+
 ---
 
-## 🚦 Phase Completion Matrix
+## 🚦 Phase Completion Matrix (Phases 1–6)
 
 | Phase / Milestone | Status | Description | Key Subsystems | Verification |
 | :--- | :---: | :--- | :--- | :---: |
@@ -28,21 +30,356 @@ This document outlines the multi-phase implementation roadmap for **Omega**—a 
 | **Phase 5.5: VirtIO Network Stack** | `COMPLETED` | VirtIO-Net packet driver & TCP/IP stack | L2 Ethernet, L3 IPv4, L4 UDP/TCP headers | Frame RX Reader |
 | **Phase 6A: Bootable Disk Generator** | `COMPLETED` | UEFI/GPT multi-format disk generator | RAW, QCOW2, VMDK, VDI with FAT32 payloads | `create_bootable_disk.sh` |
 | **Phase 6B: Firmware Compatibility** | `COMPLETED` | U-Boot (`bootefi`/`booti`) & Coreboot (EDK2/GRUB) | Embedded `/EFI/BOOT/` & `/boot/omega.elf` | `docs/FIRMWARE_BOOT.md` |
-| **Phase 6C: OVD Emulator & GUI** | `COMPLETED` | Omega Virtual Device Manager & Tcl/Tk GUI | CLI manager, runner, Tcl/Tk GUI application | `ovd_gui.tcl` |
-| **Phase 6D: Containerization & CI/CD** | `COMPLETED` | Alpine Dockerfile, DevContainers, GitHub Actions | DevContainers, Codespaces, GitHub Actions CI/CD | `.github/workflows/ci.yml` |
+| **Phase 6C: OVD Emulator & GUI** | `COMPLETED` | Omega Virtual Device Manager & Tcl/Tk GUI; x86_64 Standard VGA via `ovd_run.sh` | CLI manager, `--gpu` / `--no-gpu` launcher, Tcl/Tk GUI | `ovd_gui.tcl`, `test_ovd.sh` |
+| **Phase 6D: Containerization & CI/CD** | `COMPLETED` | Alpine Dockerfile, DevContainers, GitHub Actions | DevContainers, Codespaces, GitHub Actions CI/CD incl. `test_display.sh` | `.github/workflows/ci.yml` |
 
 ---
 
-## 🗺️ Future Architectural Expansion & Phase 7 Roadmap
+## 🎯 Production Vision
 
-### Phase 7.1: VirtIO Block Storage Device Driver
-- Implement VirtIO-Block PCI/MMIO driver for high-performance block read/write I/O.
-- Mount ext2 / FAT32 filesystems on VirtIO block storage.
+Omega's long-term goal is to evolve from a research microkernel into a **production operating system** deployable on:
 
-### Phase 7.2: Graphical Framebuffer Console (VESA / VirtIO-GPU)
-- Implement linear framebuffer display driver for hardware graphical consoles.
-- Integrate font rendering engine for graphical shell interface.
+| Form Factor | Primary ISA | Target Use |
+| :--- | :--- | :--- |
+| **Laptops & Desktops** | x86_64, AArch64 | Developer and general-purpose daily-driver computing |
+| **Tablets** | AArch64 | Touch-first productivity, media, and sideloaded apps |
+| **Phones** | AArch64 | Mobile telephony, connectivity, and consumer app ecosystem |
 
-### Phase 7.3: Native SMP Multi-Core Symmetric Multiprocessing
-- Implement SMP multi-core initialization (APIC ICR on x86_64, PSCI on AArch64, OpenSBI IPI on RISC-V 64).
-- Per-CPU scheduler queues and inter-processor interrupt (IPI) locking.
+**Recommended rollout order:** Laptops/Desktops → Tablets → Phones. Phones require the most driver, regulatory, and ecosystem work; laptops share much of the same AArch64/x86_64 hardware stack as tablets with fewer carrier and certification hurdles.
+
+---
+
+## 📋 Phase 0: Product & Architecture Decisions (Prerequisite)
+
+These decisions must be locked before large-scale production investment. They are tracked here as **Phase 0** because they gate every subsequent phase.
+
+| Decision | Options | Recommendation | Impact |
+| :--- | :--- | :--- | :--- |
+| **Kernel model** | Pure microkernel vs hybrid | Hybrid microkernel (drivers in userspace, performance-critical paths optimized) | Driver IPC overhead, security boundary, development velocity |
+| **Primary ISA for v1** | x86_64, AArch64, RISC-V | **AArch64** (mobile/tablet) + **x86_64** (desktop/laptop); defer RISC-V until hardware partners exist | Toolchain focus, driver porting effort |
+| **App compatibility model** | Custom SDK, Linux ABI, Android (ART) | Custom SDK v1 with optional Linux ABI subset for developer tooling | Defines 50%+ of userland and ecosystem work |
+| **Distribution model** | Open community vs OEM-only | Open reference images + OEM partnership track for phones | Legal, signing keys, update infrastructure |
+| **Security baseline** | Capabilities, SELinux-style MAC, sandbox-only | Capability-based IPC + per-app sandbox with explicit permission prompts | Mobile readiness, app store trust model |
+
+**Exit criteria:** Written architecture decision records (ADRs) for each row; frozen v1 target platforms (reference hardware list).
+
+---
+
+## 🗺️ Phase 7: QEMU Parity & Kernel Patterns (Near-Term)
+
+Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsystems are **reference implementations**, not production drivers—they establish APIs and behavior that real hardware drivers will implement later.
+
+| Milestone | Status | Description | Key Deliverables | Verification |
+| :--- | :---: | :--- | :--- | :---: |
+| **Phase 7.1: VirtIO Block Storage** | `PLANNED` | VirtIO-Block PCI/MMIO driver for block read/write I/O | Block device abstraction, read/write path, queue handling | Mount test partition in QEMU |
+| **Phase 7.2: System Display Module (Standard VGA)** | `COMPLETED` | x86_64 VGA text mode, Bochs VBE linear FB, dual serial+display console | `hal::Display`, Bochs DISPI 1024×768×32, 8×16 font, Multiboot2 FB tag, `kprintf` mirroring | `scripts/test_display.sh`, CI, OVD `--gpu` |
+| **Phase 7.2b: VirtIO-GPU / AArch64 Display** | `PLANNED` | Non-x86 display backends (VirtIO-GPU, simplefb, PL111) | VirtIO-GPU driver, AArch64/RISC-V HAL backends | Pixel output on `-device virtio-gpu` |
+| **Phase 7.3: SMP Multi-Core** | `PLANNED` | Symmetric multiprocessing across all cores | APIC ICR (x86), PSCI (AArch64), OpenSBI IPI (RISC-V); per-CPU run queues | Multi-core boot log, parallel thread execution |
+| **Phase 7.4: Timer-Driven Preemption** | `PLANNED` | Replace cooperative yield with hardware timer preemption | Periodic tick interrupt, preemptive context switch | Latency benchmark under load |
+| **Phase 7.5: Per-Process Address Spaces** | `PLANNED` | Isolated virtual address space per process | Separate page tables per process, kernel/user boundary enforcement | Two processes with distinct mappings |
+| **Phase 7.6: IPC Foundation** | `PLANNED` | Inter-process communication for microkernel services | Message passing, capability tokens, shared-memory grants | Driver server ↔ client round-trip |
+
+**Exit criteria:** Omega boots in QEMU with block storage, **graphical console on x86_64 (done)**, SMP, preemptive scheduling, process isolation, and a userspace driver server communicating over IPC.
+
+### Phase 7.2 Delivered (x86_64 Standard VGA)
+
+The **System Display Module (SDM)** is implemented for PC-class VGA hardware in QEMU and firmware handoff paths. See `docs/VGA_DISPLAY_PLAN.md` for the full specification.
+
+| Sub-milestone | Status | Deliverable |
+| :--- | :---: | :--- |
+| **7.2a VGA Text Mode** | `COMPLETED` | 80×25 text buffer at `0xB8000`, CRTC cursor, vsync scroll |
+| **7.2b Bochs VBE Linear FB** | `COMPLETED` | PCI probe (`1234:1111` / `1AF4:1111`), DISPI mode set, 8×16 font, graphical console grid |
+| **7.2c Bootloader FB Handoff** | `COMPLETED` | Multiboot2 framebuffer request tag in `boot.s`, tag type 8 parser |
+| **7.2d Hardening & CI** | `COMPLETED` | In-kernel self-tests, `scripts/test_display.sh`, OVD `-vga std` integration |
+
+**Deferred from Phase 7.2:** VirtIO-GPU (→ 7.2b), VMware SVGA, UEFI GOP EFI stub, full ANSI escape subset, SMP display spinlock.
+
+---
+
+## 🔒 Phase 8: Kernel Hardening (Production Safety)
+
+Required before running on untrusted workloads or real user hardware.
+
+### 8.1 Memory & Process Model
+
+| Milestone | Description | Verification |
+| :--- | :--- | :--- |
+| **8.1.1 Copy-on-Write** | COW for `fork`, shared libraries, and `mmap` | Fork + write isolation test |
+| **8.1.2 Demand Paging** | Page faults load data on first access | Fault-driven page-in test |
+| **8.1.3 `mmap` / `munmap` / `mprotect`** | Full virtual memory API for userland | libc mmap test suite |
+| **8.1.4 W^X Enforcement** | Writable and executable pages are mutually exclusive | Attempt execute-from-writable page → fault |
+| **8.1.5 ASLR** | Randomized base addresses for executables, heap, stack | Address layout entropy check |
+| **8.1.6 OOM Handling** | Memory pressure callbacks and process termination policy | Allocation failure under pressure |
+
+### 8.2 Concurrency & Scheduling
+
+| Milestone | Description | Verification |
+| :--- | :--- | :--- |
+| **8.2.1 Per-CPU Run Queues** | Scheduler scales linearly with core count | Benchmark on 4+ cores |
+| **8.2.2 IPI Infrastructure** | Inter-processor interrupts for TLB shootdown, reschedule | Cross-core TLB invalidation test |
+| **8.2.3 Kernel Synchronization** | Spinlocks, mutexes, read-copy-update paths | Stress test under contention |
+| **8.2.4 Priority Scheduling** | Real-time and normal priority classes | RT thread latency measurement |
+
+### 8.3 Security Model
+
+| Milestone | Description | Verification |
+| :--- | :--- | :--- |
+| **8.3.1 Capability System** | Fine-grained rights for IPC endpoints and device access | Unauthorized access rejected |
+| **8.3.2 Secure Boot Chain** | Signed kernel, verified init, measured boot | Boot with tampered image → refuse |
+| **8.3.3 Key Storage (TEE)** | Integration with ARM TrustZone / platform secure enclave | Seal/unseal device key test |
+| **8.3.4 Syscall Filtering** | Per-process syscall allowlists for sandboxed apps | Blocked syscall returns `EPERM` |
+| **8.3.5 Stack Canaries & Guard Pages** | Stack overflow detection | Deliberate overflow → fault |
+
+### 8.4 Reliability & Observability
+
+| Milestone | Description | Verification |
+| :--- | :--- | :--- |
+| **8.4.1 Structured Logging** | Ring buffer, log levels, subsystem tags | Log capture under boot |
+| **8.4.2 Panic Recovery & Watchdog** | Watchdog timer, graceful degradation on fatal error | Watchdog reset test |
+| **8.4.3 Crash Dumps** | Kernel and userspace minidump to storage | Post-crash dump readable |
+| **8.4.4 Tracepoints & Profiling** | Static trace events, sampling profiler hooks | Profile hot path in scheduler |
+| **8.4.5 Fuzzing Infrastructure** | Continuous syscall, VFS, and network fuzzing in CI | Fuzzer finds zero crashes in 24h run |
+
+**Exit criteria:** Kernel passes external security review checklist; fuzzing CI green; two isolated processes cannot access each other's memory or capabilities.
+
+---
+
+## 🖥️ Phase 9: Real Hardware Support
+
+QEMU VirtIO drivers do not transfer to production devices. Phase 9 introduces platform abstraction and real hardware drivers, **one reference board at a time**.
+
+### 9.0 Reference Hardware Targets
+
+| Priority | Platform | Form Factor | Boot Interface |
+| :---: | :--- | :--- | :--- |
+| 1 | QEMU `virt` (current) | Emulator | DT / UEFI |
+| 2 | Raspberry Pi 4/5 | Tablet-class SBC | Device Tree |
+| 3 | Intel NUC / generic x86_64 laptop | Laptop/Desktop | UEFI + ACPI |
+| 4 | ARM laptop (e.g. Qualcomm dev kit) | Laptop | ACPI / DT |
+| 5 | Pixel-class reference phone | Phone | SoC bootloader + DT |
+
+**Strategy:** Fully support one board before expanding. Each new board adds a `kernel/arch/<board>/` platform layer without rewriting portable subsystems.
+
+### 9.1 Platform & Firmware
+
+| Milestone | x86_64 / Laptop | AArch64 / Tablet-Phone |
+| :--- | :--- | :--- |
+| **9.1.1 Boot handoff** | UEFI boot services, ACPI tables | Device Tree or ACPI, PSCI CPU operations |
+| **9.1.2 Interrupt controller** | APIC / x2APIC | GICv3 |
+| **9.1.3 Timers** | HPET, TSC | ARM Generic Timer |
+| **9.1.4 Clock & reset** | — | SoC clock tree, reset controllers |
+| **9.1.5 PMIC / power rails** | — | Regulator framework, PMIC driver |
+
+### 9.2 Essential Driver Stack (Priority Order)
+
+| Priority | Driver | Laptop/Desktop | Tablet | Phone |
+| :---: | :--- | :---: | :---: | :---: |
+| 1 | **Storage** (NVMe, eMMC, UFS) | ✓ | ✓ | ✓ |
+| 2 | **Framebuffer / GPU** (linear FB → full GPU) | ✓ | ✓ | ✓ |
+| 3 | **Input** (keyboard, touchpad, touchscreen) | ✓ | ✓ | ✓ |
+| 4 | **Network** (Ethernet, WiFi) | ✓ | ✓ | ✓ |
+| 5 | **USB / PCIe** | ✓ | ✓ | ○ |
+| 6 | **Audio** (I2S, HDMI/DP) | ✓ | ✓ | ✓ |
+| 7 | **Power** (cpufreq, cpuidle, suspend/resume) | ✓ | ✓ | ✓ |
+| 8 | **Battery / fuel gauge** | ✓ | ✓ | ✓ |
+| 9 | **Cellular modem (RIL)** | — | ○ | ✓ |
+| 10 | **Camera (ISP), GPS, sensors, NFC, Bluetooth** | ○ | ✓ | ✓ |
+
+✓ = required for MVP · ○ = post-MVP enhancement
+
+### 9.3 Driver Architecture
+
+All drivers run as **userspace servers** communicating over the Phase 7.6 IPC layer, holding capabilities granted by the device manager:
+
+```text
+Kernel (minimal)
+  ├── IPC / capabilities / scheduling / MMU
+  └── Platform HAL (interrupt routing, IOMMU)
+
+Userspace driver servers
+  ├── storaged    (NVMe / eMMC / UFS)
+  ├── displayd    (framebuffer / GPU)
+  ├── netd        (Ethernet / WiFi / cellular)
+  ├── inputd      (HID / touch / keyboard)
+  ├── audiod      (I2S / HDMI audio)
+  └── powerd      (cpufreq / suspend / battery)
+```
+
+**Exit criteria:** Omega boots from internal storage on two reference platforms (one x86_64, one AArch64) with working storage, display, input, and network.
+
+---
+
+## 🏗️ Phase 10: Userland & Platform Services
+
+The kernel is approximately 20% of a production OS. Phase 10 builds the software stack users and developers interact with.
+
+### 10.1 Core Userspace
+
+| Milestone | Description | Key Components |
+| :--- | :--- | :--- |
+| **10.1.1 C Library** | POSIX-compatible libc (musl port or custom) | `pthread`, `malloc`, syscalls, errno, stdio |
+| **10.1.2 Init System** | Service supervision and dependency ordering | Process 1, service units, restart policy |
+| **10.1.3 Device Manager** | Hotplug enumeration and driver binding | udev-style event dispatch |
+| **10.1.4 Core Daemons** | System services | `netd`, `powerd`, `logd`, `sessiond` |
+
+### 10.2 Filesystems
+
+| Milestone | Description | Target Platform |
+| :--- | :--- | :--- |
+| **10.2.1 ext4 Support** | Full read/write ext4 on block devices | Desktop / laptop |
+| **10.2.2 f2fs Support** | Flash-optimized filesystem | Tablet / phone |
+| **10.2.3 VFS Maturity** | Inodes, dentry cache, file locking, mmap backing | All |
+| **10.2.4 Overlay / Union FS** | Layered filesystem for OTA updates | Tablet / phone |
+| **10.2.5 A/B Partition Updates** | Seamless OS updates with rollback | Tablet / phone |
+
+### 10.3 Network Stack (Production)
+
+| Milestone | Description |
+| :--- | :--- |
+| **10.3.1 Complete TCP/IP** | Full socket API, TCP state machine, UDP, ICMP |
+| **10.3.2 DHCP / DNS / NTP** | Automatic network configuration |
+| **10.3.3 TLS** | Encrypted transport (mbedTLS or similar) |
+| **10.3.4 WiFi Supplicant** | WPA2/WPA3 association and roaming |
+| **10.3.5 Firewall** | Per-app and system-wide packet filtering |
+
+### 10.4 Desktop & Laptop UX (Phase 10A)
+
+| Milestone | Description |
+| :--- | :--- |
+| **10A.1 Display Server** | Wayland-style compositor with GPU acceleration |
+| **10A.2 Window Manager** | Decorations, tiling/floating, multi-monitor |
+| **10A.3 Input Method & Accessibility** | Keyboard layouts, screen reader hooks |
+| **10A.4 System Settings** | Network, display, power, user accounts |
+| **10A.5 Terminal & Shell** | Interactive shell, terminal emulator |
+| **10A.6 Package Manager** | Signed packages, dependency resolution, repositories |
+| **10A.7 Installer** | Disk partitioning, UEFI boot entry, first-boot wizard |
+
+**Success metric (10A):** Daily-driver usable by developers on one laptop model for terminal, browser, and editor workflows.
+
+### 10.5 Mobile & Tablet UX (Phase 10B)
+
+| Milestone | Description |
+| :--- | :--- |
+| **10B.1 Touch Shell** | Gesture navigation, app launcher, status bar |
+| **10B.2 On-Screen Keyboard** | Predictive input, layouts, emoji |
+| **10B.3 App Lifecycle** | Background suspend, push notification framework |
+| **10B.4 Permissions UI** | Per-app prompts for camera, location, microphone, etc. |
+| **10B.5 OTA Update UX** | Silent background updates, rollback, recovery mode |
+| **10B.6 App SDK v1** | UI toolkit, sandbox API, build toolchain, emulator integration (extend OVD) |
+| **10B.7 Media Framework** | Audio/video playback, camera capture pipeline |
+
+**Success metric (10B):** Usable tablet for browsing, notes, and media on one reference device with sideloaded apps.
+
+### 10.6 Phone UX (Phase 10C)
+
+| Milestone | Description |
+| :--- | :--- |
+| **10C.1 Telephony (RIL)** | Voice calls, SMS, SIM management, carrier profiles |
+| **10C.2 Cellular Data** | Mobile data, APN configuration, tethering |
+| **10C.3 Deep Power Management** | Aggressive sleep, wake locks, app standby |
+| **10C.4 Location Services** | GPS, fused location, geofencing |
+| **10C.5 Sensor Framework** | Accelerometer, gyro, proximity, ambient light |
+| **10C.6 App Store / Signing** | Signed app distribution, review pipeline |
+| **10C.7 Regulatory Certification** | FCC, CE, GCF carrier certification (if shipping hardware) |
+
+**Success metric (10C):** Voice + data + core apps on one reference phone (Pixel-class dev device).
+
+**Exit criteria (Phase 10):** End-to-end boot to interactive UI on target hardware; third-party developer can build, sign, and run an app using the SDK and OVD emulator.
+
+---
+
+## 🚀 Phase 11: Production Engineering & Operations
+
+Production OS quality depends as much on engineering process as on code.
+
+| Area | Milestone | Description |
+| :--- | :--- | :--- |
+| **Build** | **11.1 Reproducible Builds** | Deterministic artifacts, hashed outputs, supply-chain audit |
+| **Build** | **11.2 Signed Artifacts** | Code signing for kernel, drivers, packages, and OTA payloads |
+| **Updates** | **11.3 OTA Infrastructure** | Delta updates, staged rollout, automatic rollback |
+| **Updates** | **11.4 Offline Recovery** | Recovery partition, USB sideload, factory reset |
+| **Compatibility** | **11.5 Stable ABI** | Frozen syscall ABI, driver IPC versioning, deprecation policy |
+| **Testing** | **11.6 Hardware CI Farm** | Automated boot/regression on reference devices 24/7 |
+| **Testing** | **11.7 Soak & Stress Testing** | Multi-day stability runs, memory leak detection |
+| **Security** | **11.8 External Audit** | Third-party kernel and crypto audit before public beta |
+| **Security** | **11.9 Bug Bounty & CVE Process** | Coordinated disclosure, security advisory pipeline |
+| **Legal** | **11.10 License Compliance** | GPL/LGPL component tracking, codec patent review, export controls |
+| **Support** | **11.11 Developer Portal** | SDK docs, API reference, sample apps, emulator downloads |
+| **Support** | **11.12 Crash Analytics** | Privacy-respecting opt-in crash reporting and symbolication |
+| **Ecosystem** | **11.13 OEM Onboarding** | BSP packages, signing key ceremony, compliance checklist |
+
+**Exit criteria:** Public beta release with OTA updates, signed packages, documented SDK, and 99.5% crash-free sessions over a 30-day soak test.
+
+---
+
+## 📅 Phase 12: Platform Rollout Timeline
+
+Estimated timelines assume a focused engineering team. Adjust proportionally for team size.
+
+| Phase | Scope | Estimated Duration | Team Size (approx.) |
+| :--- | :--- | :--- | :--- |
+| **Phase 7** | QEMU parity (block, FB, SMP, IPC) | 6–12 months | 2–5 engineers |
+| **Phase 8** | Kernel hardening | 6–12 months | 3–8 engineers |
+| **Phase 9** | Real hardware (2 reference platforms) | 12–18 months | 5–15 engineers |
+| **Phase 10A** | Desktop/laptop MVP | 12–18 months | 5–15 engineers |
+| **Phase 10B** | Tablet MVP | 12–18 months | 10–25 engineers |
+| **Phase 10C** | Phone MVP | 24–36 months | 20–50 engineers |
+| **Phase 11** | Production ops (parallel with 9–10) | Ongoing from Phase 9 | 3–10 engineers |
+
+### Consolidated Milestones
+
+```text
+Year 1        Phase 7 + 8          QEMU-complete, hardened kernel
+Year 2        Phase 9 + 10A        Real hardware, desktop daily-driver
+Year 3        Phase 10B            Tablet product beta
+Year 4–5      Phase 10C + 11       Phone product, public release, OEM partners
+```
+
+---
+
+## ✅ Immediate Next Steps for Omega (Action Items)
+
+Concrete sequence mapped to the existing codebase:
+
+1. **Complete Phase 7** — VirtIO block, VirtIO-GPU / AArch64 display (7.2b), SMP, timer preemption, per-process VM, IPC. *(Standard VGA display on x86_64 is done — Phase 7.2.)*
+2. **Select first real board** — QEMU `virt` → Raspberry Pi 4/5 → one x86_64 laptop.
+3. **Userspace init process** — Minimal init that spawns a shell over serial (validates ELF loader + syscalls end-to-end).
+4. **IPC + driver framework** — Storage, network, and display as privileged userspace servers.
+5. **Port musl (or minimal libc)** — Expand syscalls to POSIX subset required by libc.
+6. **Extend graphical console** — Scrollback, ANSI colors, userspace compositor path (kernel FB console is in place).
+7. **Freeze v1 ABI** — Document and version the syscall and IPC interfaces (`docs/ABI.md`).
+8. **Extend OVD emulator** — x86_64 Standard VGA (`--gpu` / `--no-gpu`) is wired; add VirtIO-GPU and app-developer workflows.
+9. **Defer phone work** — Until laptop/tablet daily-driver quality is demonstrated.
+
+---
+
+## 📊 Scope & Risk Summary
+
+| Goal | Estimated Effort |
+| :--- | :--- |
+| Daily-driver desktop on 1–2 machines | 5–15 engineers · 2–3 years |
+| Consumer tablet product | 20–50 engineers · 3–5 years |
+| Consumer smartphone | 50–200+ engineers · 5–10 years + OEM/carrier partners |
+
+**Key risks:**
+
+- **Driver long pole:** GPU, WiFi, and cellular modem drivers dominate calendar time.
+- **Ecosystem chicken-and-egg:** Apps require developers; developers require devices and SDK maturity.
+- **Microkernel IPC overhead:** Must be measured and optimized early to avoid performance regressions vs monolithic kernels.
+- **Phone certification:** Regulatory and carrier approval adds 6–12 months beyond software readiness.
+
+Omega's multi-arch HAL, freestanding C++20 runtime, formal syscall ABI, and OVD tooling provide a strong kernel-side foundation. The critical path to production runs through **real hardware drivers, userland maturity, and ecosystem tooling**—not additional QEMU subsystems alone.
+
+---
+
+## 📚 Related Documentation
+
+| Document | Scope |
+| :--- | :--- |
+| `docs/ARCHITECTURE.md` | Kernel architecture and HAL design |
+| `docs/ABI.md` | System call ABI specification |
+| `docs/FIRMWARE_BOOT.md` | UEFI, U-Boot, and Coreboot compatibility |
+| `docs/RUNNING.md` | Build and QEMU execution guide |
+| `docs/VGA_DISPLAY_PLAN.md` | System Display Module — Standard VGA implementation plan |
+| `docs/RISCV64_PLAN.md` | RISC-V 64 architectural plan |
+| `docs/COMPLETION_REPORT.md` | Phase 1–6 verification report |

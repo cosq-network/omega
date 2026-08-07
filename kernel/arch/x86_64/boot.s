@@ -3,6 +3,7 @@
 .set MULTIBOOT2_ARCH_X86,  0
 .set HEADER_LENGTH,        (multiboot_header_end - multiboot_header)
 .set CHECKSUM,             -(MULTIBOOT2_MAGIC + MULTIBOOT2_ARCH_X86 + HEADER_LENGTH)
+.set MULTIBOOT2_BOOT_MAGIC, 0x36d76289
 
 .section .multiboot2, "a"
 .align 8
@@ -17,6 +18,15 @@ multiboot_header:
     .short 0
     .long 12
     .long _start
+
+    /* Framebuffer request tag (type 5) */
+    .align 8
+    .short 5
+    .short 0
+    .long 20
+    .long 1024
+    .long 768
+    .long 32
 
     /* End Tag */
     .short 0
@@ -35,7 +45,7 @@ pvh_note_start:
     .align 4
     .long _start               /* 32-bit Physical Entry Address */
 
-/* Initial Page Tables (PML4, PDPT, PD) */
+/* Initial Page Tables — identity map first 4 GiB via 2 MiB huge pages */
 .section .bss
 .align 4096
 pml4:
@@ -44,6 +54,16 @@ pdpt:
     .skip 4096
 pd:
     .skip 4096
+pd1:
+    .skip 4096
+pd2:
+    .skip 4096
+pd3:
+    .skip 4096
+
+.global multiboot_info_ptr
+multiboot_info_ptr:
+    .skip 8
 
 .align 16
 stack_bottom:
@@ -70,25 +90,48 @@ _start:
     cli
     mov $stack_top, %esp
 
-    /* Set up Page Tables (Identity mapping first 1GB using 2MB Huge Pages) */
+    /* Preserve Multiboot2 info pointer when a Multiboot2 bootloader is used. */
+    cmpl $MULTIBOOT2_BOOT_MAGIC, %eax
+    jne 1f
+    mov %ebx, (multiboot_info_ptr)
+1:
+
+    /* pml4[0] -> pdpt */
     mov $pdpt, %eax
-    or $0x3, %eax /* Present + Writable */
+    or $0x3, %eax
     mov %eax, pml4
 
-    mov $pd, %eax
-    or $0x3, %eax
-    mov %eax, pdpt
+    xor %ecx, %ecx              /* gb = 0..3 (each gigabyte) */
+0:
+    cmp $4, %ecx
+    jge paging_done
 
-    mov $0, %ecx
-1:
+    mov $pd, %ebx
     mov %ecx, %eax
-    shl $21, %eax /* multiply by 2MB */
-    or $0x83, %eax /* Present + Writable + Huge Page (bit 7) */
-    mov %eax, pd(,%ecx,8)
-    inc %ecx
-    cmp $512, %ecx
-    jne 1b
+    shl $12, %eax             /* gb * 4096 -> next page directory */
+    add %eax, %ebx
 
+    mov %ebx, %eax
+    or $0x3, %eax
+    mov %eax, pdpt(,%ecx,8)
+
+    xor %edx, %edx            /* i = 0..511 */
+2:
+    mov %ecx, %esi
+    shl $9, %esi              /* gb * 512 */
+    add %edx, %esi
+    mov %esi, %eax
+    shl $21, %eax
+    or $0x83, %eax
+    mov %eax, (%ebx,%edx,8)
+    inc %edx
+    cmp $512, %edx
+    jl 2b
+
+    inc %ecx
+    jmp 0b
+
+paging_done:
     /* Load PML4 to CR3 */
     mov $pml4, %eax
     mov %eax, %cr3

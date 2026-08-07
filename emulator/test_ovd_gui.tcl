@@ -8,9 +8,17 @@ namespace import tcltest::*
 
 set SCRIPT_DIR [file dirname [file normalize [info script]]]
 set GUI_SCRIPT [file join $SCRIPT_DIR "ovd_gui.tcl"]
+set RUN_SCRIPT [file join $SCRIPT_DIR "ovd_run.sh"]
 
 test test_gui_script_exists {Verify ovd_gui.tcl file existence} -body {
     file exists $GUI_SCRIPT
+} -result {1}
+
+test test_ovd_run_vga_config {Verify ovd_run.sh configures Standard VGA for x86_64} -body {
+    set fp [open $RUN_SCRIPT r]
+    set content [read $fp]
+    close $fp
+    string match {*-vga std*} $content
 } -result {1}
 
 test test_gui_script_syntax {Verify ovd_gui.tcl syntax correctness} -body {

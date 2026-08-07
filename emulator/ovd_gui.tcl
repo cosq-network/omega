@@ -41,7 +41,7 @@ pack .header -fill x -side top
 ttk::label .header.title -text "Omega Virtual Device (OVD) Manager" -style Title.TLabel
 pack .header.title -side top -anchor w
 
-ttk::label .header.sub -text "Manage and emulate cross-platform Omega OS virtual devices (x86_64, AArch64, RISC-V 64)" -style SubTitle.TLabel
+ttk::label .header.sub -text "Manage Omega OS virtual devices — x86_64 includes Standard VGA (Bochs VBE) graphical output" -style SubTitle.TLabel
 pack .header.sub -side top -anchor w
 
 # Main Container Frame
@@ -113,10 +113,10 @@ pack .main.right.sep -side top -fill x -pady 10
 ttk::label .main.right.run_title -text "Device Execution" -style TLabel -font {"Helvetica" 12 "bold"}
 pack .main.right.run_title -side top -anchor w -pady {0 10}
 
-button .main.right.btn_run_gui -text "Launch (GUI Display)" -bg $accent_blue -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command run_device_gui
+button .main.right.btn_run_gui -text "Launch (GUI — x86 VGA window)" -bg $accent_blue -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command run_device_gui
 pack .main.right.btn_run_gui -side top -fill x -pady {0 8}
 
-button .main.right.btn_run_head -text "Launch (Headless Console)" -bg "#89DCEB" -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command run_device_headless
+button .main.right.btn_run_head -text "Launch (Headless serial console)" -bg "#89DCEB" -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command run_device_headless
 pack .main.right.btn_run_head -side top -fill x -pady {0 8}
 
 button .main.right.btn_delete -text "Delete Selected Device" -bg $accent_red -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command delete_device

@@ -9,6 +9,7 @@ namespace kernel {
     void kprint_hex(uint64_t val);
     void kprint_dec(uint64_t val);
     void kprintf(const char* fmt, ...);
+    void kprint_enable_console_routing();
 }
 
 #endif // OMEGA_KERNEL_KPRINT_HPP

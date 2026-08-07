@@ -44,15 +44,24 @@ set(KERNEL_SOURCES
     kernel/sys/userland.cpp
     kernel/sys/elf_loader.cpp
     kernel/sys/net.cpp
+    kernel/sys/framebuffer.cpp
+    kernel/sys/font.cpp
+    kernel/sys/display_console.cpp
 )
 
 if(ARCH STREQUAL "x86_64")
     set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/kernel/arch/x86_64/linker.ld")
+    include_directories(${CMAKE_CURRENT_SOURCE_DIR}/kernel/arch/x86_64)
     list(APPEND KERNEL_SOURCES
         kernel/arch/x86_64/boot.s
         kernel/arch/x86_64/serial.cpp
         kernel/arch/x86_64/idt.cpp
         kernel/arch/x86_64/pci.cpp
+        kernel/arch/x86_64/vga_regs.cpp
+        kernel/arch/x86_64/vga_text.cpp
+        kernel/arch/x86_64/bochs_vbe.cpp
+        kernel/arch/x86_64/boot_fb.cpp
+        kernel/arch/x86_64/display.cpp
     )
 elseif(ARCH STREQUAL "aarch64")
     set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/kernel/arch/aarch64/linker.ld")
@@ -62,6 +71,7 @@ elseif(ARCH STREQUAL "aarch64")
         kernel/arch/aarch64/uart.cpp
         kernel/arch/aarch64/gic.cpp
         kernel/arch/aarch64/pci.cpp
+        kernel/arch/aarch64/display_stub.cpp
     )
 elseif(ARCH STREQUAL "riscv64")
     set(LINKER_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/kernel/arch/riscv64/linker.ld")
@@ -71,6 +81,7 @@ elseif(ARCH STREQUAL "riscv64")
         kernel/arch/riscv64/uart.cpp
         kernel/arch/riscv64/plic.cpp
         kernel/arch/riscv64/pci.cpp
+        kernel/arch/riscv64/display_stub.cpp
     )
 else()
     message(FATAL_ERROR "Unsupported Architecture: ${ARCH}. Choose x86_64, aarch64, or riscv64.")

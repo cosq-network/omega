@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 
 # Omega Kernel Integration Test Suite
-# Tests compiled ELF binaries across x86_64, AArch64, and RISC-V 64 architectures in QEMU
+# Tests compiled ELF binaries across x86_64, AArch64, and RISC-V 64 architectures in QEMU.
+# x86_64 runs include System Display Module (Standard VGA / Bochs VBE) verification.
 
 set -e
 
@@ -28,6 +29,7 @@ run_test() {
     rm -f "${log_file}"
 
     # Run QEMU in background and capture PID
+    # shellcheck disable=SC2086
     ${qemu_bin} ${qemu_args} > "${log_file}" 2>&1 &
     local qemu_pid=$!
 
@@ -39,7 +41,7 @@ run_test() {
 
     local failed=0
     for expected in "${expected_outputs[@]}"; do
-        if grep -q "${expected}" "${log_file}"; then
+        if grep -Fq "${expected}" "${log_file}"; then
             echo -e "  [PASS] Found: '${expected}'"
         else
             echo -e "  [${RED}FAIL${NC}] Missing expected output: '${expected}'"
@@ -72,14 +74,21 @@ rm -rf "${BUILD_DIR}/riscv64" && mkdir -p "${BUILD_DIR}/riscv64" && cd "${BUILD_
 cmake -DCMAKE_TOOLCHAIN_FILE=../../cmake/riscv64-toolchain.cmake -DARCH=riscv64 ../.. > /dev/null
 make > /dev/null
 
-# 2. x86_64 Integration Test Suite
+cd "${PROJECT_ROOT}"
+
+# 2. x86_64 Integration Test Suite (Standard VGA -vga std, headless display)
 run_test "x86_64" \
     "qemu-system-x86_64" \
-    "-kernel ${BUILD_DIR}/x86_64/omega.elf -serial stdio -display none" \
+    "-kernel ${BUILD_DIR}/x86_64/omega.elf -serial stdio -display none -vga std" \
     "Welcome to Omega Kernel" \
     "Architecture Identified: x86_64" \
     "Physical Memory Manager initialized" \
     "Virtual Memory Manager (VMM) initialized" \
+    "[+] Display: BochsVbe" \
+    "[TEST][PASS] Bochs VBE DISPI register readback" \
+    "[TEST][PASS] Bochs VBE linear framebuffer pixel" \
+    "[TEST][PASS] Framebuffer draw path" \
+    "[TEST][PASS] Display console write path" \
     "Kernel Heap Allocator initialized" \
     "Interrupt Descriptor Table (IDT) Initialized" \
     "Preemptive Multi-threading Scheduler Initialized" \
@@ -91,7 +100,7 @@ run_test "x86_64" \
     "Userland Mode Manager (Ring 3 / EL0) Initialized" \
     "Valid 64-bit ELF Binary Detected"
 
-# 3. AArch64 Integration Test Suite
+# 3. AArch64 Integration Test Suite (display HAL stub — serial only)
 run_test "aarch64" \
     "qemu-system-aarch64" \
     "-M virt -cpu cortex-a57 -nographic -kernel ${BUILD_DIR}/aarch64/omega.elf" \
@@ -108,6 +117,17 @@ run_test "aarch64" \
     "VirtIO-Net Driver & TCP/IP Network Stack Initialized" \
     "Userland Mode Manager (Ring 3 / EL0) Initialized" \
     "Valid 64-bit ELF Binary Detected"
+
+# 4. RISC-V 64 smoke test (OpenSBI firmware handoff — kernel display is stubbed)
+run_test "riscv64" \
+    "qemu-system-riscv64" \
+    "-M virt -cpu rv64 -bios default -nographic -kernel ${BUILD_DIR}/riscv64/omega.elf" \
+    "OpenSBI"
+
+# 5. VGA Display Module dedicated test matrix (Bochs VBE + VgaText fallback)
+echo -e "\n[*] Running VGA Display Module test suite..."
+chmod +x "${PROJECT_ROOT}/scripts/test_display.sh"
+bash "${PROJECT_ROOT}/scripts/test_display.sh"
 
 echo -e "\n${GREEN}=================================================${NC}"
 echo -e "${GREEN}      ALL INTEGRATION TESTS PASSED CLEANLY!       ${NC}"

@@ -10,8 +10,11 @@
 #include "kernel/elf_loader.hpp"
 #include "kernel/net.hpp"
 #include "arch/uart.hpp"
+#include "arch/display.hpp"
 #include "arch/interrupts.hpp"
 #include "arch/pci.hpp"
+#include "kernel/console.hpp"
+#include "kernel/framebuffer.hpp"
 
 // Static Heap Allocation Buffer (1 MB) to guarantee physical memory availability across architectures
 static uint8_t kernel_heap_buffer[1024 * 1024] __attribute__((aligned(8)));
@@ -42,10 +45,20 @@ static const uint8_t mock_elf_binary[] __attribute__((aligned(8))) = {
 };
 
 extern "C" void kernel_main() {
-    // Initialize UART hardware
+    // Serial first for early trap/debug output before display is ready.
     hal::uart_init();
 
-    // Print welcome Banner
+    // PMM/VMM must be ready before framebuffer mapping (may lie above 1 GiB).
+    memory::PhysicalMemoryManager::init(0x200000, 32 * 1024 * 1024);
+    memory::VirtualMemoryManager::init();
+
+#if defined(__x86_64__)
+    // Standard VGA / Bochs VBE — x86_64 only (other arches use HAL stubs).
+    hal::Display::init();
+    display::Console::init();
+    kernel::kprint_enable_console_routing();
+#endif
+
     kernel::kprintf("\n==========================================\n");
     kernel::kprintf("      Welcome to Omega Kernel v0.1        \n");
     kernel::kprintf("  Freestanding C++ Microkernel Architecture \n");
@@ -64,11 +77,21 @@ extern "C" void kernel_main() {
     kernel::kprintf("[!] Architecture: Unknown\n");
 #endif
 
-    // Initialize Physical Memory Manager (Simulating 32MB physical RAM at 2MB offset)
-    memory::PhysicalMemoryManager::init(0x200000, 32 * 1024 * 1024);
-
-    // Initialize Virtual Memory Manager
-    memory::VirtualMemoryManager::init();
+#if defined(__x86_64__)
+    if (!hal::Display::run_self_tests()) {
+        kernel::kprintf("[!] Display self-tests reported failures\n");
+    }
+    if (!display::Console::self_test()) {
+        kernel::kprintf("[!] Console self-test failed\n");
+    } else {
+        kernel::kprintf("[TEST][PASS] Display console write path\n");
+    }
+    if (display::framebuffer_active() && !display::framebuffer_self_test()) {
+        kernel::kprintf("[!] Framebuffer self-test failed\n");
+    } else if (display::framebuffer_active()) {
+        kernel::kprintf("[TEST][PASS] Framebuffer draw path\n");
+    }
+#endif
 
     // Initialize Heap Allocator using static kernel heap buffer
     memory::HeapAllocator::init(reinterpret_cast<uintptr_t>(kernel_heap_buffer), sizeof(kernel_heap_buffer));

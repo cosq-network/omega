@@ -65,6 +65,7 @@ ovd.name=${NAME}
 ovd.arch=${ARCH}
 ovd.ram=${RAM}
 ovd.disk=${DISK}
+ovd.vga=$([ "${ARCH}" = "x86_64" ] && echo "std" || echo "none")
 EOF
 
         # Create virtual storage disk image

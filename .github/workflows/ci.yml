@@ -87,6 +87,11 @@ jobs:
           chmod +x scripts/test.sh
           ./scripts/test.sh
 
+      - name: Run VGA Display Module Tests
+        run: |
+          chmod +x scripts/test_display.sh
+          ./scripts/test_display.sh
+
       - name: Generate Bootable Disk Images (RAW, QCOW2, VMDK, VDI)
         run: |
           chmod +x scripts/create_bootable_disk.sh

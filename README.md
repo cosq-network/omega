@@ -8,7 +8,7 @@
 
 - **Natively Cross-Compiled on macOS (Apple Silicon M1/M2/M3)**: Built using Homebrew LLVM (`clang++` + `ld.lld`) and CMake toolchain integration without external GCC cross-compiler dependencies.
 - **Triple Architecture Support**:
-  - **x86_64 (x64)**: 64-bit Long Mode entry, PAE paging, PML4 4-level page tables (2MB Huge Pages identity mapping), GDT loading, and Xen PVH ELF note (`.xen_note`) for direct QEMU booting.
+  - **x86_64 (x64)**: 64-bit Long Mode entry, PAE paging, PML4 4-level page tables (2MB Huge Pages identity mapping), GDT loading, Xen PVH ELF note (`.xen_note`) for direct QEMU booting, and **Standard VGA** output (VGA text mode + Bochs VBE linear framebuffer).
   - **AArch64 (ARM64)**: Dynamic Exception Level transition (`EL2 -> EL1`), 2048-byte aligned `VBAR_EL1` vector table, and `SP_EL1` stack setup.
   - **RISC-V 64 (`rv64gc`)**: Supervisor Mode (S-mode) boot entry, `Sv39` 3-level page tables, `stvec` trap vector, OpenSBI console `ecall` interface, and `satp` register mapping.
 - **Freestanding C++20 Runtime**: Independent of host C/C++ standard libraries (`-ffreestanding -fno-exceptions -fno-rtti`). Implements freestanding memory primitives (`memcpy`, `memset`, `memmove`, `memcmp`) and vararg printing (`kprintf`).
@@ -23,9 +23,10 @@
 - **ELF 64-bit Executable Parser & Loader**: `Elf64Header` and `Elf64ProgramHeader` parser loading `PT_LOAD` segment virtual addresses into memory.
 - **PCI Bus Scanner**: Bus configuration space reader (`0xCF8` Address / `0xCFC` Data ports) enumerating vendor/device IDs across 256 PCI buses.
 - **VirtIO Network Stack**: VirtIO-Net packet reader, Ethernet L2, IPv4 L3, and UDP/TCP L4 stack headers.
+- **System Display Module (x86_64 Standard VGA)**: Layered display HAL with VGA text mode (80×25 at `0xB8000`), Bochs VBE linear framebuffer (1024×768×32 via DISPI), Multiboot2 framebuffer handoff, 8×16 bitmap font, and a kernel graphical console. `kprintf` output is mirrored to serial (COM1) and the active display backend concurrently.
 - **Firmware & Bootloader Compatibility**: Compatible with **UEFI/GPT**, **U-Boot** (`bootefi` / `booti`), and **Coreboot** (TianoCore / GRUB).
 - **Multi-Format Virtual Disk Image Generator**: Generates RAW (`.img`), QCOW2 (`.qcow2`), VMDK (`.vmdk`), and VDI (`.vdi`) disk images with embedded FAT32 payloads (`/EFI/BOOT/` and `/boot/omega.elf`).
-- **Omega Virtual Device (OVD) Manager & GUI**: Android-like virtual device manager CLI (`emulator/ovd_manager.sh`), launcher script (`emulator/ovd_run.sh`), and Tcl/Tk GUI application (`emulator/ovd_gui.tcl`).
+- **Omega Virtual Device (OVD) Manager & GUI**: Android-like virtual device manager CLI (`emulator/ovd_manager.sh`), launcher with Standard VGA support (`emulator/ovd_run.sh --gpu` / `--no-gpu`), and Tcl/Tk GUI application (`emulator/ovd_gui.tcl`).
 - **Containerization & CI/CD**: Minimal Alpine-based `Dockerfile`, VSCode DevContainers/Codespaces (`.devcontainer/devcontainer.json`), and GitHub Actions CI/CD (`.github/workflows/ci.yml`).
 
 ---
@@ -41,7 +42,25 @@
 - **RISC-V 64 (`kernel/arch/riscv64/boot.s` & `trap.s`)**:
   - Supervisor Mode entry loaded at `0x80200000` above OpenSBI firmware. Clears `sstatus.SIE`, initializes `stvec` supervisor trap vector, sets up 16 KiB boot stack pointer, and branches to `kernel_main()`.
 
-### 2. System Call ABI Conventions (`docs/ABI.md`)
+### 2. System Display Module (`docs/VGA_DISPLAY_PLAN.md`)
+
+x86_64 only in v1; AArch64 and RISC-V ship display HAL stubs until Phase 7.2b.
+
+| Layer | Location | Role |
+| :--- | :--- | :--- |
+| **HAL** | `kernel/include/arch/display.hpp`, `kernel/arch/x86_64/{display,vga_text,vga_regs,bochs_vbe,boot_fb}.cpp` | Backend selection: BootFramebuffer → BochsVbe → VgaText |
+| **Console** | `kernel/sys/display_console.cpp`, `kernel/sys/framebuffer.cpp`, `kernel/sys/font.cpp` | Dual-target console (serial + VGA text + FB), font rendering |
+| **Integration** | `kernel/init/main.cpp`, `kernel/sys/kprint.cpp`, `kernel/arch/x86_64/boot.s` | Init after VMM; Multiboot2 framebuffer request tag |
+
+**QEMU launch (x86_64):**
+
+```bash
+./scripts/run_qemu.sh              # headless Bochs VBE: -vga std -display none
+./scripts/run_qemu.sh --gui        # graphical window (SDL / Cocoa)
+./scripts/run_qemu.sh --text       # VGA text fallback: -vga none
+```
+
+### 3. System Call ABI Conventions (`docs/ABI.md`)
 - **x86_64**: `syscall` instruction (Syscall ID in `RAX`, Args in `RDI`, `RSI`, `RDX`, `RCX`, `R8`, `R9`).
 - **AArch64**: `svc #0` instruction (Syscall ID in `X8`, Args in `X0`-`X5`).
 - **RISC-V 64**: `ecall` instruction (Syscall ID in `A7`, Args in `A0`-`A5`).
@@ -68,25 +87,28 @@ omega/
 │   ├── RISCV64_PLAN.md            # RISC-V 64 Architectural Plan
 │   ├── ROADMAP.md                 # Multi-Phase Implementation Roadmap
 │   ├── RUNNING.md                 # QEMU Execution & Build Guide
+│   ├── VGA_DISPLAY_PLAN.md        # System Display Module (Standard VGA) plan
 │   └── COMPLETION_REPORT.md       # Final Verification Report
 ├── emulator/
 │   ├── ovd_gui.tcl                # Tcl/Tk Omega Virtual Device Manager GUI
 │   ├── ovd_manager.sh             # OVD Device Creator & Registry CLI
-│   ├── ovd_run.sh                 # OVD Launcher Script (Headful GUI & Headless)
+│   ├── ovd_run.sh                 # OVD Launcher (x86: -vga std; --gpu / --no-gpu)
 │   ├── test_ovd.sh                # Automated OVD Integration Test Suite
 │   └── test_ovd_gui.tcl           # Tcl/Tk GUI Unit Test Suite
 ├── scripts/
 │   ├── create_bootable_disk.sh    # UEFI GPT Disk Image Generator
-│   ├── test.sh                    # Multi-Arch QEMU Kernel Integration Test Suite
+│   ├── run_qemu.sh                # Quick x86_64 QEMU launcher (VGA modes)
+│   ├── test.sh                    # Multi-Arch QEMU Integration Tests (+ display)
+│   ├── test_display.sh            # VGA / System Display Module test matrix
 │   └── test_disk_images.sh        # Disk Image Verification Test Suite
 └── kernel/
     ├── arch/
-    │   ├── x86_64/                # x86_64 boot assembly, serial, idt, pci, linker.ld
-    │   ├── aarch64/               # AArch64 boot assembly, vectors, uart, gic, pci, linker.ld
-    │   └── riscv64/               # RISC-V 64 boot assembly, trap, uart, plic, pci, linker.ld
-    ├── include/                   # Kernel HAL & subsystem header files
+    │   ├── x86_64/                # Boot, serial, idt, pci, VGA/display, linker.ld
+    │   ├── aarch64/               # Boot, vectors, uart, gic, pci, display stub, linker.ld
+    │   └── riscv64/               # Boot, trap, uart, plic, pci, display stub, linker.ld
+    ├── include/                   # Kernel HAL & subsystem headers (display, console, framebuffer)
     ├── init/main.cpp              # Kernel entry point
-    └── sys/                       # Subsystem implementations (pmm, vmm, heap, scheduler, syscall, vfs, initrd, userland, elf_loader, net)
+    └── sys/                       # PMM, VMM, heap, scheduler, syscall, VFS, display_console, font, framebuffer, …
 ```
 
 ---
@@ -122,14 +144,19 @@ docker run -it --rm -v $(pwd):/workspace omega-dev
 ### 4. Run Omega Virtual Device (OVD) Manager GUI
 ```bash
 ./emulator/ovd_gui.tcl
+
+# Or launch from CLI (x86_64 includes Standard VGA):
+./emulator/ovd_run.sh run --name <device> --gpu      # SDL/Cocoa window
+./emulator/ovd_run.sh run --name <device> --no-gpu   # headless serial + Bochs VBE
 ```
 
 ### 5. Run Automated Test Suites
 ```bash
-./scripts/test.sh              # QEMU Kernel Integration Tests
-./scripts/test_disk_images.sh   # Bootable Disk Image Tests
-./emulator/test_ovd.sh          # OVD Device Lifecycle Tests
-tclsh emulator/test_ovd_gui.tcl # OVD Tcl/Tk GUI Unit Tests
+./scripts/test.sh               # Multi-arch integration tests (includes test_display.sh)
+./scripts/test_display.sh     # VGA display matrix: Bochs VBE, VgaText fallback, self-tests
+./scripts/test_disk_images.sh   # Bootable disk image tests
+./emulator/test_ovd.sh          # OVD lifecycle + x86_64 display verification
+tclsh emulator/test_ovd_gui.tcl # OVD Tcl/Tk GUI unit tests
 ```
 
 ---

@@ -1,5 +1,8 @@
 #include "kernel/kprint.hpp"
+#include "kernel/console.hpp"
 #include "arch/uart.hpp"
+
+static bool console_routing_enabled = false;
 
 // Minimal stdarg implementations for freestanding C++
 typedef __builtin_va_list va_list;
@@ -9,11 +12,30 @@ typedef __builtin_va_list va_list;
 
 namespace kernel {
 
+void kprint_enable_console_routing() {
+    console_routing_enabled = true;
+}
+
 void kputc(char c) {
+    if (console_routing_enabled) {
+        display::Console::putchar(c);
+        return;
+    }
     hal::uart_putc(c);
 }
 
 void kputs(const char* str) {
+    if (str == nullptr) {
+        return;
+    }
+    if (console_routing_enabled) {
+        size_t len = 0;
+        while (str[len] != '\0') {
+            ++len;
+        }
+        display::Console::write(str, len);
+        return;
+    }
     hal::uart_puts(str);
 }
 
