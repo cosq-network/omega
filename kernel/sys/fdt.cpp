@@ -74,6 +74,39 @@ bool find_simple_framebuffer(SimpleFramebuffer* out) {
     }
     return false;
 }
+
+bool find_virtio_mmio(VirtioMmioDevice* out, uint32_t ordinal) {
+    if (!out || !g_boot_fdt || (g_boot_fdt & 3u)) return false;
+    const uint8_t* base = reinterpret_cast<const uint8_t*>(g_boot_fdt);
+    if (be32(base) != 0xD00DFEEDu) return false;
+    const uint32_t total = be32(base+4), struct_off=be32(base+8), strings_off=be32(base+12), struct_size=be32(base+36), strings_size=be32(base+32);
+    if (total < 40 || total > 16u*1024u*1024u || struct_off >= total || strings_off >= total || struct_size > total-struct_off || strings_size > total-strings_off) return false;
+    const uint8_t* structure = base + struct_off; const char* strings = reinterpret_cast<const char*>(base + strings_off);
+    struct Node { bool candidate, reg; VirtioMmioDevice device; };
+    Node stack[16]{}; uint32_t depth=0, address_cells=2, size_cells=1, off=0, found=0;
+    while (off + 4 <= struct_size) {
+        const uint32_t token=be32(structure+off); off+=4;
+        if (token==1) {
+            if (depth>=16) return false; Node node{}; const char* name=reinterpret_cast<const char*>(structure+off); size_t n=0;
+            while (off+n<struct_size && name[n]) ++n; if (off+n>=struct_size) return false; off+=(n+4)&~3u; stack[depth++]=node;
+        } else if (token==2) {
+            if (!depth) return false; const Node& node=stack[depth-1];
+            if (node.candidate && node.reg) { if (found++ == ordinal) { *out=node.device; return true; } }
+            --depth;
+        } else if (token==3) {
+            if (off+8>struct_size || !depth) return false; const uint32_t n=be32(structure+off), nameoff=be32(structure+off+4); off+=8;
+            if (off+((n+3)&~3u)>struct_size || nameoff>=strings_size) return false; Node& node=stack[depth-1]; const char* prop=strings+nameoff; const uint8_t* value=structure+off;
+            if (equal(prop,"#address-cells") && n>=4 && depth==1) address_cells=be32(value);
+            else if (equal(prop,"#size-cells") && n>=4 && depth==1) size_cells=be32(value);
+            else if (equal(prop,"compatible")) node.candidate=has_compatible(reinterpret_cast<const char*>(value),n,"virtio,mmio");
+            else if (equal(prop,"reg") && n >= (address_cells+size_cells)*4) { node.device.phys_addr=static_cast<uintptr_t>(cells(value,address_cells)); node.device.size=cells(value+address_cells*4,size_cells); node.reg=true; }
+            off+=(n+3)&~3u;
+        } else if (token==4) continue;
+        else if (token==9) break;
+        else return false;
+    }
+    return false;
+}
 }
 
 extern "C" void omega_set_fdt_pointer(uintptr_t pointer) { fdt::set_boot_pointer(pointer); }

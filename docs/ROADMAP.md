@@ -73,7 +73,7 @@ Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsys
 | :--- | :---: | :--- | :--- | :---: |
 | **Phase 7.1: VirtIO Block Storage** | `PLANNED` | VirtIO-Block PCI/MMIO driver for block read/write I/O | Block device abstraction, read/write path, queue handling | Mount test partition in QEMU |
 | **Phase 7.2: System Display Module (Standard VGA)** | `COMPLETED` | x86_64 VGA text mode, Bochs VBE linear FB, dual serial+display console | `hal::Display`, Bochs DISPI 1024×768×32, 8×16 font, Multiboot2 FB tag, `kprintf` mirroring | `scripts/test_display.sh`, CI, OVD `--gpu` |
-| **Phase 7.2b: AArch64 & RISC-V Display** | `IN PROGRESS` | SimpleFb (DT), shared FDT parser, portable framebuffer console; VirtIO-GPU remains planned | FDT walker, DT pointer handoff, `SimpleFb` HALs, boot/linker fixes, serial fallback | `scripts/test_display_aarch64.sh`, QEMU AArch64/RISC-V smoke tests |
+| **Phase 7.2b: AArch64 & RISC-V Display** | `IN PROGRESS` | SimpleFb (DT), shared FDT parser, portable framebuffer console, and guarded VirtIO-GPU MMIO foundation | FDT walker, DT pointer handoff, `SimpleFb` HALs, identity-map VMM bring-up, VirtIO-GPU protocol/queue scaffold, serial fallback | `scripts/test_display_aarch64.sh`, QEMU AArch64/RISC-V smoke tests |
 | **Phase 7.3: SMP Multi-Core** | `PLANNED` | Symmetric multiprocessing across all cores | APIC ICR (x86), PSCI (AArch64), OpenSBI IPI (RISC-V); per-CPU run queues | Multi-core boot log, parallel thread execution |
 | **Phase 7.4: Timer-Driven Preemption** | `PLANNED` | Replace cooperative yield with hardware timer preemption | Periodic tick interrupt, preemptive context switch | Latency benchmark under load |
 | **Phase 7.5: Per-Process Address Spaces** | `PLANNED` | Isolated virtual address space per process | Separate page tables per process, kernel/user boundary enforcement | Two processes with distinct mappings |
@@ -103,12 +103,12 @@ Extends the SDM to non-x86 targets using **framebuffer-first** backends (no VGA 
 | **7.2b.1 FDT Infrastructure** | `COMPLETED` | Shared `kernel/sys/fdt.cpp` walker; DT pointer capture through AArch64 `x0` and RISC-V OpenSBI `a1` |
 | **7.2b.2 SimpleFb (AArch64)** | `COMPLETED*` | SimpleFb backend, format metadata, shared console routing, safe serial fallback, and pixel self-test path |
 | **7.2b.3 SimpleFb (RISC-V)** | `COMPLETED*` | Correct OpenSBI entry placement, PMM bootstrap storage, display HAL, and portable console integration |
-| **7.2b.4 VirtIO-GPU** | `PLANNED` | Shared `virtio_gpu.cpp`; SET_SCANOUT; OVD `--gpu` on AArch64 |
+| **7.2b.4 VirtIO-GPU** | `IN PROGRESS` | Shared GPU protocol and MMIO discovery scaffold; activation remains opt-in pending verified queue completion |
 | **7.2b.5 CI & Hardening** | `IN PROGRESS` | `scripts/test_display_aarch64.sh`, integration assertions, pixel-format dispatch; real framebuffer CI pending |
 
 \* QEMU's default `virt` configuration in the current environment does not expose a DT `simple-framebuffer` node, so the validated path uses serial fallback; a real DT framebuffer activates the same SimpleFb backend.
 
-**Current state:** AArch64 and RISC-V use real `display.cpp` HALs rather than stubs. Shared display initialization runs on all architectures after PMM/VMM. RISC-V now reaches `kernel_main()` under OpenSBI. The current framebuffer mapping is an identity-map QEMU bring-up path; a full architecture-specific VMM is still required for arbitrary physical framebuffer addresses. VirtIO-GPU remains blocked on PCI/MMIO discovery and a reusable VirtIO queue/transport layer.
+**Current state:** AArch64 and RISC-V use real `display.cpp` HALs rather than stubs. Shared display initialization runs on all architectures after PMM/VMM, and RISC-V reaches `kernel_main()` under OpenSBI. The current framebuffer mapping is an identity-map QEMU bring-up path; a full architecture-specific VMM is still required for arbitrary physical framebuffer addresses. VirtIO-MMIO discovery, feature negotiation, queue layout, and the 2D command sequence now exist in `kernel/sys/virtio_gpu.cpp`, but activation is guarded by `ENABLE_EXPERIMENTAL_VIRTIO_GPU` until queue completion is validated without risking early boot. PCI ECAM transport and userspace display capabilities remain next milestones.
 
 ---
 

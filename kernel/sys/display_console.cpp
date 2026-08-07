@@ -177,6 +177,7 @@ void Console::putchar(char c) {
 
     text_putchar_raw(c);
     fb_putchar_raw(c);
+    hal::Display::flush();
 }
 
 void Console::write(const char* s, size_t len) {

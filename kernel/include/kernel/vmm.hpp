@@ -9,6 +9,8 @@ enum PageFlags {
     PAGE_PRESENT  = (1 << 0),
     PAGE_WRITABLE = (1 << 1),
     PAGE_USER     = (1 << 2),
+    PAGE_EXEC     = (1 << 3),
+    PAGE_DEVICE   = (1 << 4),
 };
 
 class VirtualMemoryManager {

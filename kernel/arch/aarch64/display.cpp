@@ -2,6 +2,7 @@
 #include "kernel/fdt.hpp"
 #include "kernel/kprint.hpp"
 #include "kernel/vmm.hpp"
+#include "kernel/virtio_gpu.hpp"
 
 namespace hal {
 
@@ -26,6 +27,10 @@ static bool map_framebuffer(FramebufferInfo* info, uint64_t size) {
 
 void Display::init() {
     active = DisplayBackend::None; caps = {}; fb_info = {};
+    if (virtio_gpu::init(&fb_info)) {
+        active = DisplayBackend::VirtioGpu; caps.linear_framebuffer = true;
+        return;
+    }
     fdt::SimpleFramebuffer simple{};
     if (fdt::find_simple_framebuffer(&simple)) {
         fb_info.phys_addr = simple.phys_addr;
@@ -42,7 +47,7 @@ void Display::init() {
 
 DisplayBackend Display::active_backend() { return active; }
 DisplayCapabilities Display::capabilities() { return caps; }
-const char* Display::backend_name() { return active == DisplayBackend::SimpleFb ? "SimpleFb" : "None"; }
+const char* Display::backend_name() { return active == DisplayBackend::SimpleFb ? "SimpleFb" : active == DisplayBackend::VirtioGpu ? "VirtioGpu" : "None"; }
 void Display::text_clear(uint8_t) {}
 void Display::text_putc(uint8_t, uint8_t, char, uint8_t) {}
 void Display::text_set_cursor(uint8_t, uint8_t) {}
@@ -50,9 +55,14 @@ void Display::text_scroll_up(uint8_t) {}
 uint16_t Display::text_peek(uint8_t, uint8_t) { return 0; }
 bool Display::set_mode(uint32_t, uint32_t, uint8_t) { return false; }
 const FramebufferInfo* Display::framebuffer() { return caps.linear_framebuffer ? &fb_info : nullptr; }
-void Display::flush() { asm volatile("" ::: "memory"); }
+void Display::flush() { if (active == DisplayBackend::VirtioGpu) virtio_gpu::flush(); else asm volatile("" ::: "memory"); }
 
 bool Display::run_self_tests() {
+    if (active == DisplayBackend::VirtioGpu) {
+        const bool pass = virtio_gpu::self_test();
+        kernel::kprintf("[TEST][%s] VirtioGpu display setup\n", pass ? "PASS" : "FAIL");
+        return pass;
+    }
     if (active != DisplayBackend::SimpleFb) {
         kernel::kprintf("[TEST][SKIP] SimpleFb (no linear framebuffer)\n");
         return true;

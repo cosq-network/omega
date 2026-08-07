@@ -13,7 +13,7 @@
 
 ## 1. Executive Summary
 
-Phase 7.2 delivered the **System Display Module (SDM)** on **x86_64** using Standard VGA (text mode + Bochs VBE). The AArch64 and RISC-V 64 SimpleFb integration slice is now implemented: both architectures have real display HALs, shared FDT parsing, boot-time DT pointer handoff, portable console initialization, and safe serial fallback. VirtIO-GPU remains the next display milestone.
+Phase 7.2 delivered the **System Display Module (SDM)** on **x86_64** using Standard VGA (text mode + Bochs VBE). The AArch64 and RISC-V 64 SimpleFb integration slice is implemented: both architectures have real display HALs, shared FDT parsing, boot-time DT pointer handoff, portable console initialization, and safe serial fallback. A guarded VirtIO-GPU MMIO 2D foundation has now been added; production activation still requires verified queue completion and PCI ECAM support.
 
 This plan specifies how to extend the SDM to **AArch64** and **RISC-V 64** without rewriting the portable console, font, or `kprintf` routing layers. The same `hal::Display` → `display::Console` → `framebuffer.cpp` stack used on x86_64 applies; only arch-specific **backend probe**, **framebuffer mapping**, and **mode setup** differ.
 
@@ -155,7 +155,7 @@ VirtIO-GPU is the long-term paravirtual display for QEMU `virt` and cloud/VM dep
 9. VIRTIO_GPU_CMD_TRANSFER_TO_HOST + RESOURCE_FLUSH (when partial updates needed)
 ```
 
-**Shared implementation:** Place protocol logic in `kernel/sys/virtio_gpu.cpp`; arch files provide PCI/MMIO transport only (mirror future VirtIO block/net layering).
+**Current implementation:** `kernel/sys/virtio_gpu.cpp` contains MMIO discovery, feature negotiation, split-queue setup, display-info/resource/scanout commands, backing storage, and flush. It is enabled explicitly with `-DENABLE_EXPERIMENTAL_VIRTIO_GPU=ON`; the default build keeps the probe disabled so a malformed or incomplete early-boot queue cannot stall the kernel. PCI ECAM transport and a reusable transport abstraction remain to be completed.
 
 ### 4.3 Boot Framebuffer Handoff (`BootFramebuffer`)
 
@@ -283,11 +283,11 @@ kernel/
 
 | Task ID | Task | Files | Verification |
 | :---: | :--- | :--- | :--- |
-| **7.2b.4a** | Shared VirtIO transport layer | `virtio_transport.cpp`, `virtio_gpu.cpp` | Detect `1AF4:1050` |
-| **7.2b.4b** | GET_DISPLAY_INFO + RESOURCE_CREATE_2D | `virtio_gpu.cpp` | Log mode from device |
-| **7.2b.4c** | SET_SCANOUT + pixel write | `virtio_gpu.cpp` | Crosshair or banner visible |
-| **7.2b.4d** | Backend priority over SimpleFb when device present | `display.cpp` init | `[+] Display: VirtioGpu` |
-| **7.2b.4e** | OVD `--gpu` for AArch64 | `ovd_run.sh` | SDL window with banner |
+| **7.2b.4a** | VirtIO-MMIO discovery and queue foundation | `fdt.cpp`, `virtio_gpu.cpp` | Implemented behind experimental build flag; PCI transport pending |
+| **7.2b.4b** | GET_DISPLAY_INFO + RESOURCE_CREATE_2D | `virtio_gpu.cpp` | Command path implemented; completion validation pending |
+| **7.2b.4c** | SET_SCANOUT + pixel write | `virtio_gpu.cpp` | Command path implemented; visible scanout validation pending |
+| **7.2b.4d** | Backend priority over SimpleFb when device is verified | `display.cpp` init | Integration hook implemented; default remains guarded |
+| **7.2b.4e** | OVD `--gpu` for AArch64 | `ovd_run.sh` | Deferred until PCI/MMIO queue validation |
 
 ### Phase 7.2b.5 — Hardening
 
@@ -306,7 +306,7 @@ kernel/
 | Config | Command | Expected Backend |
 | :--- | :--- | :--- |
 | AArch64 serial + DT FB | `qemu-system-aarch64 -M virt -cpu cortex-a57 -nographic -kernel omega.elf` | SimpleFb when firmware supplies DT FB; otherwise serial fallback |
-| AArch64 VirtIO-GPU GUI | `... -device virtio-gpu-pci -display sdl` | VirtioGpu |
+| AArch64 VirtIO-GPU GUI | `... -device virtio-gpu-pci -display sdl` | Planned after PCI ECAM transport |
 | RISC-V serial + DT FB | `qemu-system-riscv64 -M virt -cpu rv64 -bios default -nographic -kernel omega.elf` | SimpleFb when firmware supplies DT FB; otherwise serial fallback |
 | OVD AArch64 headless | `ovd_run.sh run --name tablet --no-gpu` | SimpleFb or serial |
 | OVD AArch64 GUI | `ovd_run.sh run --name tablet --gpu` | VirtioGpu |
@@ -338,7 +338,7 @@ kernel/
 | :--- | :--- |
 | `[+] Display: SimpleFb WxHxBPP` | DT backend active |
 | `[!] Display: No framebuffer backend found (serial only)` | Safe fallback when no DT/GOP/virtio backend is available |
-| `[+] Display: VirtioGpu WxHxBPP` | VirtIO-GPU scanout active |
+| `[+] Display: VirtioGpu WxHxBPP` | VirtIO-GPU scanout active after experimental queue validation |
 | `[TEST][PASS] SimpleFb pixel read/write` | FB mapping verified |
 | `[TEST][PASS] Display console write path` | Portable console verified (reuse x86 test) |
 
