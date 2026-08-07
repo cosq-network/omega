@@ -52,6 +52,7 @@ for script in \
     "${PROJECT_ROOT}/scripts/test_storage_unit.sh" \
     "${PROJECT_ROOT}/scripts/create_bootable_disk.sh" \
     "${PROJECT_ROOT}/scripts/test_disk_images.sh" \
+    "${PROJECT_ROOT}/emulator/libovd.sh" \
     "${OVD_MANAGER}" \
     "${OVD_RUN}" \
     "${PROJECT_ROOT}/emulator/test_ovd.sh" \
@@ -71,6 +72,20 @@ for profile in auto virtio ahci usb none; do
     expect_contains "run_qemu dry-run emits a command (${profile})" "QEMU command:" "${output}"
 done
 pass "run_qemu accepts all x86_64 launcher storage profiles"
+
+for option in \
+    "--network user" \
+    "--network socket" \
+    "--ephemeral" \
+    "--readonly" \
+    "--qmp" \
+    "--no-build"; do
+    output="${TMP_DIR}/run-qemu-option-${option// /-}.log"
+    # --dry-run keeps this contract test independent of QEMU execution.
+    # shellcheck disable=SC2086
+    bash "${RUN_QEMU}" ${option} --dry-run >"${output}" 2>&1
+    expect_contains "run_qemu accepts ${option}" "QEMU command:" "${output}"
+done
 
 # The storage unit test is itself a script-level contract and must remain
 # runnable independently from the full architecture/QEMU suite.

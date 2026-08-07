@@ -4,14 +4,14 @@
 # Verifies generation of RAW (.img), QCOW2 (.qcow2), VMDK (.vmdk), VDI (.vdi) formats
 # Verifies embedded payload paths ::/EFI/BOOT/ and ::/boot/ via mdir
 
-set -e
+set -euo pipefail
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
 NC='\033[0m'
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-IMAGES_DIR="${PROJECT_ROOT}/disk_images"
+IMAGES_DIR="${OMEGA_IMAGE_ROOT:-${PROJECT_ROOT}/disk_images}"
 SCRIPT="${PROJECT_ROOT}/scripts/create_bootable_disk.sh"
 
 echo "================================================="
@@ -34,7 +34,11 @@ verify_arch_image() {
     local vdi_img="${IMAGES_DIR}/omega-${arch}-bootable.vdi"
 
     # Verify Disk Image Files Exist and Non-empty
-    for img in "${raw_img}" "${qcow2_img}" "${vmdk_img}" "${vdi_img}"; do
+    local expected_images=("${raw_img}")
+    if command -v qemu-img >/dev/null 2>&1; then
+        expected_images+=("${qcow2_img}" "${vmdk_img}" "${vdi_img}")
+    fi
+    for img in "${expected_images[@]}"; do
         if [ -f "${img}" ] && [ -s "${img}" ]; then
             echo -e "  [PASS] Image Exists & Non-empty: $(basename "${img}")"
         else

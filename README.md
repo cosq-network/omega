@@ -29,7 +29,7 @@
 - **Experimental VirtIO-Block Path**: Opt-in VirtIO-MMIO block discovery and read/write/flush request encoding with AArch64/RISC-V cross-build coverage. Enable with `-DENABLE_EXPERIMENTAL_VIRTIO_BLOCK=ON` while queue completion validation continues.
 - **Firmware & Bootloader Compatibility**: Compatible with **UEFI/GPT**, **U-Boot** (`bootefi` / `booti`), and **Coreboot** (TianoCore / GRUB).
 - **Multi-Format Virtual Disk Image Generator**: Generates RAW (`.img`), QCOW2 (`.qcow2`), VMDK (`.vmdk`), and VDI (`.vdi`) disk images with embedded FAT32 payloads (`/EFI/BOOT/` and `/boot/omega.elf`).
-- **Omega Virtual Device (OVD) Manager & GUI**: Android-like virtual device manager CLI (`emulator/ovd_manager.sh`), Standard VGA/SimpleFb launcher, selectable QEMU storage profiles (`virtio`, `ahci`, `usb`, `sd`, `optical`, `none`), and Tcl/Tk GUI application (`emulator/ovd_gui.tcl`).
+- **Omega Virtual Device (OVD) Manager & GUI**: Android-like multi-architecture device manager with schema validation, safe lifecycle commands, daemon logs/QMP state, snapshots, import/export, networking/initrd/ephemeral profiles, selectable storage transports, and Tcl/Tk status/log controls.
 - **Containerization & CI/CD**: Minimal Alpine-based `Dockerfile`, VSCode DevContainers/Codespaces (`.devcontainer/devcontainer.json`), and GitHub Actions CI/CD (`.github/workflows/ci.yml`).
 
 ---
@@ -73,7 +73,13 @@
 ./scripts/run_qemu.sh --gui        # graphical window (SDL / Cocoa)
 ./scripts/run_qemu.sh --text       # VGA text fallback: -vga none
 ./scripts/run_qemu.sh --storage virtio --dry-run  # inspect x86_64 VirtIO disk wiring
+./scripts/run_qemu.sh --network user --initrd build/initrd.img --dry-run
+./scripts/run_qemu.sh --ephemeral --qmp
 ```
+
+The complete launcher and image-generation options are documented in
+[`scripts/README.md`](scripts/README.md). Build and image locations can be
+isolated with `OMEGA_BUILD_ROOT` and `OMEGA_IMAGE_ROOT`.
 
 ### 3. System Call ABI Conventions (`docs/ABI.md`)
 - **x86_64**: `syscall` instruction (Syscall ID in `RAX`, Args in `RDI`, `RSI`, `RDX`, `RCX`, `R8`, `R9`).
@@ -108,17 +114,18 @@ omega/
 │   └── COMPLETION_REPORT.md       # Final Verification Report
 ├── emulator/
 │   ├── README.md                  # OVD manager, storage profiles, and tests
+│   ├── libovd.sh                   # Shared OVD validation and lifecycle helpers
 │   ├── ovd_gui.tcl                # Tcl/Tk Omega Virtual Device Manager GUI
-│   ├── ovd_manager.sh             # OVD Device Creator & Registry CLI
+│   ├── ovd_manager.sh             # OVD manager, lifecycle, import/export, snapshots
 │   ├── ovd_run.sh                 # OVD Launcher (display + storage profiles)
 │   ├── test_ovd_unit.sh           # OVD config and dry-run command unit tests
 │   ├── test_ovd.sh                # OVD lifecycle, storage transport, and boot tests
 │   └── test_ovd_gui.tcl           # Tcl/Tk GUI Unit Test Suite
 ├── scripts/
 │   ├── README.md                  # Script catalog, usage, and verification guide
-│   ├── create_bootable_disk.sh    # UEFI GPT Disk Image Generator
-│   ├── run_qemu.sh                # Quick x86_64 QEMU launcher (VGA modes)
-│   ├── test.sh                    # Multi-Arch QEMU Integration Tests (+ display)
+│   ├── create_bootable_disk.sh    # Configurable multi-arch boot image generator
+│   ├── run_qemu.sh                # x86_64 launcher with storage/network/initrd options
+│   ├── test.sh                    # Non-destructive multi-arch regression suite
 │   ├── test_display.sh            # VGA / System Display Module test matrix
 │   ├── test_display_aarch64.sh    # AArch64 display HAL/fallback smoke test
 │   ├── test_storage_unit.sh       # Host storage API/partition unit tests
@@ -163,6 +170,8 @@ docker run -it --rm -v $(pwd):/workspace omega-dev
 ### 3. Generate Bootable Virtual Disk Images
 ```bash
 ./scripts/create_bootable_disk.sh
+./scripts/create_bootable_disk.sh --arch aarch64 --size 128
+./scripts/create_bootable_disk.sh --output-dir /tmp/omega-images --dry-run
 ```
 
 ### 4. Run Omega Virtual Device (OVD) Manager GUI
@@ -180,6 +189,8 @@ OVD storage profiles are selectable at launch: `virtio`, `ahci`, `usb`,
 `sd`, `optical`, or `none`. The profile controls the QEMU transport and
 device model while the shared `userdata.img` remains the backing image.
 Use `--dry-run` to inspect the generated command without starting QEMU.
+For the complete OVD lifecycle, snapshot, import/export, networking, initrd,
+QMP, and GUI guide, see [`emulator/README.md`](emulator/README.md).
 
 ### 5. Run Automated Test Suites
 ```bash
@@ -193,6 +204,17 @@ Use `--dry-run` to inspect the generated command without starting QEMU.
 ./emulator/test_ovd_unit.sh     # OVD configuration and storage profile unit tests
 ./emulator/test_ovd.sh          # OVD lifecycle, storage profiles, and display verification
 tclsh emulator/test_ovd_gui.tcl # OVD Tcl/Tk GUI unit tests
+```
+
+The full test runner reuses existing build directories and intentionally
+terminates QEMU after expected boot markers; `Killed: 9` messages from those
+bounded idle-loop tests are expected. Use isolated roots when running image
+generation or destructive test workflows:
+
+```bash
+export OMEGA_BUILD_ROOT="$PWD/.omega-test/build"
+export OMEGA_IMAGE_ROOT="$PWD/.omega-test/images"
+./scripts/test_scripts_unit.sh
 ```
 
 ---

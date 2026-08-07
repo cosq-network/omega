@@ -39,7 +39,10 @@ test test_gui_script_syntax {Verify ovd_gui.tcl syntax correctness} -body {
     set has_create  [string match "*proc create_device*" $content]
     set has_run_gui [string match "*proc run_device_gui*" $content]
     set has_delete  [string match "*proc delete_device*" $content]
-    expr {$has_refresh && $has_create && $has_run_gui && $has_delete}
+    set has_storage [string match "*storage_combo*" $content]
+    set has_stop [string match "*proc stop_device*" $content]
+    set has_logs [string match "*proc show_device_logs*" $content]
+    expr {$has_refresh && $has_create && $has_run_gui && $has_delete && $has_storage && $has_stop && $has_logs}
 } -result {1}
 
 cleanupTests

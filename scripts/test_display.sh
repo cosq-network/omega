@@ -13,6 +13,9 @@ NC='\033[0m'
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build/x86_64"
 LOG_FILE="${BUILD_DIR}/display_test.log"
+QEMU_PIDS=()
+cleanup_qemu() { for pid in "${QEMU_PIDS[@]}"; do kill -9 "${pid}" 2>/dev/null || true; done; }
+trap cleanup_qemu EXIT
 
 echo "================================================="
 echo "   Omega VGA Display Module Test Suite           "
@@ -45,6 +48,7 @@ run_qemu_capture() {
         -display none \
         ${extra_args} > "${LOG_FILE}" 2>&1 &
     local pid=$!
+    QEMU_PIDS+=("${pid}")
     sleep 4
     kill -9 "${pid}" 2>/dev/null || true
 }

@@ -2,6 +2,9 @@
 set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BUILD_DIR="${PROJECT_ROOT}/build"
+QEMU_PIDS=()
+cleanup_qemu() { for pid in "${QEMU_PIDS[@]}"; do kill -9 "${pid}" 2>/dev/null || true; done; }
+trap cleanup_qemu EXIT
 bash "${PROJECT_ROOT}/scripts/test_storage_unit.sh"
 
 build_arch() {
@@ -25,6 +28,7 @@ run_and_assert() {
         *) echo "unknown architecture: ${arch}" >&2; return 1 ;;
     esac
     local qemu_pid=$!
+    QEMU_PIDS+=("${qemu_pid}")
     sleep 4
     kill -9 "${qemu_pid}" 2>/dev/null || true
     grep -Fq "[TEST][PASS] Storage core memory block path" "${log}"

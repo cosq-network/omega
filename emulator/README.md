@@ -1,24 +1,24 @@
 # Omega Virtual Device Emulator
 
-The `emulator/` directory provides the Omega Virtual Device (OVD) manager,
-QEMU launcher, graphical manager, and emulator-focused tests. OVDs are local
-configuration directories under `emulator/ovd/` containing a configuration
-file and a backing `userdata.img` disk image.
+The Omega Virtual Device (OVD) Emulator provides a consistent way to create,
+configure, launch, inspect, test, and remove QEMU-based Omega virtual
+devices. It supports the project’s three target architectures:
 
-## Components
+- `x86_64`
+- `aarch64`
+- `riscv64`
 
-| File | Role |
-| --- | --- |
-| `ovd_manager.sh` | Create, list, and delete OVD configurations and disk images |
-| `ovd_run.sh` | Launch an OVD through QEMU or print its command with `--dry-run` |
-| `ovd_gui.tcl` | Tcl/Tk manager for creating, listing, launching, and deleting OVDs |
-| `test_ovd_unit.sh` | Non-booting unit tests for configuration and command construction |
-| `test_ovd.sh` | QEMU lifecycle and boot integration tests for all three architectures |
-| `test_ovd_gui.tcl` | Static Tcl/Tk GUI contract tests |
+The emulator is intended for kernel development, architecture bring-up,
+storage/display testing, CI, and interactive experimentation. It is not a
+full desktop virtualization product; the QEMU device models and kernel
+drivers are still under active development.
 
-## Create and manage an OVD
+## Quick start
+
+From the repository root:
 
 ```sh
+# Create a 1 GiB x86_64 OVD with a 64 MiB VirtIO disk.
 ./emulator/ovd_manager.sh create \
     --name phone \
     --arch x86_64 \
@@ -26,132 +26,510 @@ file and a backing `userdata.img` disk image.
     --disk 64 \
     --storage virtio
 
-./emulator/ovd_manager.sh list
+# Inspect the generated QEMU command without starting QEMU.
+./emulator/ovd_run.sh run --name phone --no-gpu --dry-run
+
+# Launch headless.
+./emulator/ovd_run.sh run --name phone --no-gpu
+
+# Launch in the background.
+./emulator/ovd_manager.sh start --name phone --no-gpu --daemon
+
+# Check and stop it.
+./emulator/ovd_manager.sh status --name phone
+./emulator/ovd_manager.sh stop --name phone
+
+# Remove the OVD after stopping it.
 ./emulator/ovd_manager.sh delete --name phone
 ```
 
-Supported architectures are `x86_64`, `aarch64`, and `riscv64`. New OVDs
-default to 1024 MB of RAM, a 64 MB raw disk, and the `virtio` storage
-profile. The generated `config.ini` contains:
+## Requirements
 
-```ini
-ovd.name=phone
-ovd.arch=x86_64
-ovd.ram=1024
-ovd.disk=64
-ovd.storage=virtio
-ovd.storage.image=userdata.img
-ovd.storage.readonly=false
-ovd.vga=std
+Required for normal use:
+
+- Bash 4+;
+- QEMU system binaries:
+  - `qemu-system-x86_64`;
+  - `qemu-system-aarch64`;
+  - `qemu-system-riscv64`;
+- CMake;
+- Clang/LLVM and the Omega architecture toolchains;
+- `make` or a supported CMake build backend.
+
+Optional tools:
+
+- Tcl/Tk for `ovd_gui.tcl`;
+- `qemu-img` for snapshots and image conversion;
+- `nc` with Unix-socket support for QMP shutdown;
+- `mtools` and `qemu-img` for bootable disk-image workflows.
+
+The launcher builds the requested kernel automatically if the expected ELF is
+missing. Building in advance usually gives clearer output and faster startup:
+
+```sh
+cmake -S . -B build/x86_64 \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/x86_64-toolchain.cmake \
+  -DARCH=x86_64
+cmake --build build/x86_64
 ```
 
-The manager validates the architecture, storage profile, and required name.
-Deletion removes the selected OVD directory and its backing image.
+## OVD layout
 
-## Launch an OVD
+By default, OVDs are stored under `emulator/ovd/`:
+
+```text
+emulator/ovd/phone/
+├── config.ini
+├── userdata.img
+└── state/
+    ├── command.argv
+    ├── qemu.log
+    ├── qemu.pid
+    ├── qmp.sock
+    └── network.sock
+```
+
+The runtime files are created only when the corresponding features are used.
+`state/` must not be copied into a running clone or treated as persistent
+device data.
+
+## OVD configuration
+
+New devices use schema version 1:
+
+```ini
+ovd.schema=1
+ovd.name=phone
+ovd.arch=x86_64
+ovd.ram_mb=1024
+ovd.disk_mb=64
+ovd.storage.profile=virtio
+ovd.storage.image=userdata.img
+ovd.storage.format=raw
+ovd.storage.readonly=false
+ovd.display.profile=standard-vga
+ovd.network.profile=none
+ovd.initrd=
+```
+
+The manager validates architecture, resource sizes, names, storage profiles,
+network profiles, display profiles, and configured image paths. Older configs
+using `ovd.ram`, `ovd.disk`, or `ovd.storage` remain readable through
+compatibility fallbacks.
+
+Use validation before launching an existing or imported OVD:
+
+```sh
+./emulator/ovd_manager.sh validate --name phone
+./emulator/ovd_manager.sh show --name phone
+```
+
+## Creating devices
+
+```sh
+./emulator/ovd_manager.sh create \
+  --name laptop \
+  --arch x86_64 \
+  --ram 4096 \
+  --disk 512 \
+  --storage virtio \
+  --network user \
+  --display standard-vga
+```
+
+Create an AArch64 or RISC-V device:
+
+```sh
+./emulator/ovd_manager.sh create \
+  --name tablet \
+  --arch aarch64 \
+  --ram 2048 \
+  --disk 128 \
+  --storage virtio \
+  --network none \
+  --display simplefb
+```
+
+Attach an initrd during creation:
+
+```sh
+./emulator/ovd_manager.sh create \
+  --name recovery \
+  --arch x86_64 \
+  --initrd build/initrd.img
+```
+
+Valid names contain 1–64 letters, numbers, `.`, `_`, or `-`. Path traversal,
+slashes, whitespace, and shell metacharacters are rejected.
+
+RAM and disk values are specified in MiB. Current validation limits are:
+
+- RAM: 128–1,048,576 MiB;
+- disk: 1–16,777,216 MiB.
+
+## Managing devices
+
+List devices in human-readable form:
+
+```sh
+./emulator/ovd_manager.sh list
+```
+
+Example machine-readable output:
+
+```sh
+./emulator/ovd_manager.sh list --json
+```
+
+Inspect state and logs:
+
+```sh
+./emulator/ovd_manager.sh status --name laptop
+./emulator/ovd_manager.sh logs --name laptop
+```
+
+Start and stop devices:
+
+```sh
+./emulator/ovd_manager.sh start --name laptop --no-gpu --daemon
+./emulator/ovd_manager.sh stop --name laptop
+./emulator/ovd_manager.sh stop --name laptop --force
+```
+
+`--force` is intended for unresponsive or stale processes. Normal shutdown
+uses QMP when available and falls back to signals.
+
+Delete a stopped device:
+
+```sh
+./emulator/ovd_manager.sh delete --name laptop
+```
+
+Delete a running device only when intentionally discarding it:
+
+```sh
+./emulator/ovd_manager.sh delete --name laptop --force
+```
+
+## Launching devices
+
+The low-level launcher accepts the full option set:
+
+```sh
+./emulator/ovd_run.sh run --name phone [options]
+```
+
+Options:
+
+| Option | Description |
+| --- | --- |
+| `--gpu` | Enable graphical display behavior |
+| `--no-gpu` | Force serial/headless behavior |
+| `--storage PROFILE` | Override the configured storage profile |
+| `--storage-image FILE` | Use an external storage image |
+| `--network PROFILE` | Override the configured network profile |
+| `--initrd FILE` | Attach an initrd image |
+| `--readonly` | Open the storage image read-only |
+| `--ephemeral` | Use QEMU snapshot mode and discard disk writes on exit |
+| `--qmp` | Enable QMP for a foreground launch |
+| `--no-qmp` | Disable QMP, including daemon-mode QMP |
+| `--daemon` | Run in background and record lifecycle state |
+| `--dry-run` | Print the exact QEMU command without starting it |
+
+Examples:
 
 ```sh
 ./emulator/ovd_run.sh run --name phone --gpu
 ./emulator/ovd_run.sh run --name phone --no-gpu
-./emulator/ovd_run.sh run --name phone --storage virtio --dry-run
+./emulator/ovd_run.sh run --name phone --ephemeral --no-gpu
+./emulator/ovd_run.sh run --name phone --network user --daemon
+./emulator/ovd_run.sh run --name phone --initrd build/initrd.img --dry-run
+./emulator/ovd_run.sh run --name phone --storage-image /tmp/test.img --readonly
 ```
 
-`--gpu` enables Standard VGA on x86_64 and requests the experimental
-VirtIO-GPU device on AArch64/RISC-V. `--no-gpu` uses headless serial output.
-The launcher builds the architecture-specific kernel if the expected ELF is
-missing.
+`--dry-run` is the recommended first step when diagnosing QEMU arguments. It
+also works without starting a VM and records the generated arguments in
+`state/command.argv`.
 
-## Storage transport profiles
+## Display profiles
 
-The launcher exposes the same `userdata.img` through selectable QEMU device
-models:
+| Architecture | Display behavior |
+| --- | --- |
+| x86_64 | Standard VGA / Bochs VBE with optional SDL or Cocoa output |
+| AArch64 | SimpleFb/serial fallback; experimental VirtIO-GPU with `--gpu` |
+| RISC-V | SimpleFb/serial fallback; experimental VirtIO-GPU with `--gpu` |
 
-| Profile | x86_64 | AArch64/RISC-V | QEMU model |
-| --- | --- | --- | --- |
-| `virtio` | Yes | Yes | `virtio-blk-pci` / `virtio-blk-device` |
-| `ahci` | Yes | Rejected | IDE disk attachment for SATA/ATA-style testing |
-| `usb` | Yes | Yes | `usb-storage` |
-| `sd` | Yes | Yes | SD drive attachment |
-| `optical` | Yes | Command construction supported | `ide-cd`, read-only media |
-| `none` | Yes | Yes | No storage device |
+On Linux, graphical mode uses SDL when `DISPLAY` is set. On macOS it uses
+Cocoa. If no graphical session is available, use `--no-gpu` or inspect the
+command with `--dry-run`.
 
-Select a profile at launch to override the profile stored in `config.ini`:
+## Storage profiles
+
+Storage profiles select the QEMU transport for the OVD backing image:
+
+| Profile | x86_64 | AArch64 | RISC-V | QEMU model |
+| --- | --- | --- | --- | --- |
+| `virtio` | Yes | Yes | Yes | `virtio-blk-pci` / `virtio-blk-device` |
+| `ahci` | Yes | No | No | IDE/ATA-style disk attachment |
+| `usb` | Yes | Yes | Yes | USB Mass Storage model |
+| `sd` | Yes | Yes | Yes | SD drive attachment |
+| `optical` | Yes | Yes* | Yes* | Read-only `ide-cd` model |
+| `none` | Yes | Yes | Yes | No storage device |
+
+`*` Command construction is supported; runtime availability depends on the
+QEMU machine’s controller model.
+
+Examples:
 
 ```sh
+./emulator/ovd_run.sh run --name phone --storage virtio --dry-run
 ./emulator/ovd_run.sh run --name phone --storage usb --no-gpu
 ./emulator/ovd_run.sh run --name phone --storage optical --dry-run
 ./emulator/ovd_run.sh run --name phone --storage none --dry-run
 ```
 
-`--dry-run` is the safest way to inspect the final QEMU arguments. It prints
-the command and never starts QEMU. It also makes the launcher unit-testable
-without requiring a graphical desktop or a running virtual machine.
+The current kernel storage implementation includes a common storage layer,
+synthetic writable backend, GPT/MBR parser, and guarded experimental
+VirtIO-Block path. NVMe, AHCI, SDHCI, USB MSC, ATAPI, filesystem mounting,
+and production hardware writes remain separate kernel milestones.
 
-These profiles describe QEMU device wiring. They do not imply that the
-corresponding kernel driver is complete. The kernel currently has the common
-storage API, synthetic writable backend, partition parser, and guarded
-experimental VirtIO-Block implementation. NVMe, AHCI, SDHCI, USB Mass
-Storage, ATAPI, filesystem mounting, and production hardware writes remain
-separate implementation milestones.
+## Network profiles
+
+| Profile | Behavior |
+| --- | --- |
+| `none` | No network device is attached |
+| `user` | QEMU user-mode networking with a VirtIO network device |
+| `socket` | Unix-socket network endpoint for multi-VM experiments |
+
+Examples:
+
+```sh
+./emulator/ovd_run.sh run --name phone --network none --dry-run
+./emulator/ovd_run.sh run --name phone --network user --daemon
+./emulator/ovd_run.sh run --name phone --network socket --dry-run
+```
+
+The network profile controls QEMU wiring. It does not imply that the Omega
+kernel network stack has a complete device initialization path for every
+architecture or transport.
+
+## Initrd, external images, and ephemeral mode
+
+Attach an initrd:
+
+```sh
+./emulator/ovd_run.sh run --name phone --initrd build/initrd.img --dry-run
+```
+
+Use an external image explicitly selected by the user:
+
+```sh
+./emulator/ovd_run.sh run \
+  --name phone \
+  --storage-image /tmp/omega-test.img \
+  --storage virtio \
+  --readonly
+```
+
+Use a disposable disk view:
+
+```sh
+./emulator/ovd_run.sh run --name phone --ephemeral --no-gpu
+```
+
+Ephemeral mode passes QEMU’s `-snapshot` option. It does not create a named
+OVD snapshot; use the snapshot commands below for persistent image snapshots.
+
+## Snapshots
+
+Snapshots require `qemu-img` and a compatible image format:
+
+```sh
+./emulator/ovd_manager.sh snapshot create \
+  --name phone \
+  --snapshot clean
+
+./emulator/ovd_manager.sh snapshot list --name phone
+./emulator/ovd_manager.sh snapshot apply --name phone --snapshot clean
+```
+
+Stop the device before creating or applying a snapshot. Snapshot operations
+modify the backing image and should not be interrupted.
+
+## Clone, export, and import
+
+Clone an OVD without copying runtime PID, log, or socket state:
+
+```sh
+./emulator/ovd_manager.sh clone \
+  --name phone \
+  --new-name phone-copy
+```
+
+Export and import an OVD:
+
+```sh
+./emulator/ovd_manager.sh export \
+  --name phone \
+  --output phone.tar.gz
+
+./emulator/ovd_manager.sh import \
+  --archive phone.tar.gz \
+  --name phone-restored
+```
+
+Imported archives are validated before the OVD becomes usable. Do not import
+archives from untrusted sources without reviewing their contents.
 
 ## GUI manager
+
+Launch the Tcl/Tk GUI:
 
 ```sh
 ./emulator/ovd_gui.tcl
 ```
 
-The GUI requires Tcl/Tk and provides device creation, listing, GUI launch,
-headless launch, and deletion. The GUI currently uses the manager defaults,
-including the default `virtio` storage profile. Use `ovd_run.sh` directly when
-you need to select a different storage profile or inspect a dry-run command.
+The GUI supports:
 
-## Tests
+- OVD creation;
+- architecture, RAM, and disk selection;
+- storage and network profile selection;
+- device listing with architecture, RAM, disk, storage, and state;
+- graphical and headless launch;
+- daemon-backed stop operations;
+- log viewing;
+- deletion with confirmation;
+- periodic state refresh.
 
-### OVD unit tests
+Use the CLI for advanced options such as external images, initrds, snapshots,
+ephemeral mode, import/export, and dry-run command inspection.
+
+## Environment isolation
+
+Use these variables to keep OVD state outside the repository:
+
+```sh
+export OMEGA_OVD_ROOT="$PWD/.omega-test/ovd"
+export OMEGA_BUILD_ROOT="$PWD/.omega-test/build"
+export OMEGA_IMAGE_ROOT="$PWD/.omega-test/images"
+```
+
+This is recommended for CI, parallel worktrees, and destructive test runs.
+The current launcher still resolves kernel source and toolchain files from the
+repository root.
+
+## Testing
+
+Unit tests do not boot QEMU:
 
 ```sh
 ./emulator/test_ovd_unit.sh
+tclsh emulator/test_ovd_gui.tcl
 ```
 
-This suite does not boot QEMU. It verifies:
+The OVD unit suite verifies:
 
-- Bash syntax for OVD scripts;
-- missing-name and invalid-profile rejection;
-- persistence of architecture, disk, and storage configuration;
-- OVD listing and cleanup;
-- dry-run command generation for VirtIO, AHCI, USB, SD, optical, and none;
-- correct QEMU device model for each profile;
-- AHCI rejection on AArch64;
-- cleanup of temporary OVD state.
+- shell syntax;
+- invalid names, profiles, architectures, RAM, and disk sizes;
+- schema/configuration persistence;
+- human-readable and JSON listing;
+- all storage profile dry-runs;
+- architecture/profile compatibility;
+- daemon startup, status, and stop with fake QEMU;
+- clone and validation;
+- export/import;
+- snapshot command dispatch with fake `qemu-img`;
+- cleanup behavior.
 
-### OVD integration tests
+The lifecycle suite boots real QEMU instances:
 
 ```sh
 ./emulator/test_ovd.sh
 ```
 
-The integration suite creates temporary x86_64, AArch64, and RISC-V OVDs,
-checks storage profile wiring, boots each through QEMU, verifies architecture
-and display markers, and deletes the OVDs afterward. QEMU is stopped after
-the expected boot output; the resulting `Killed: 9` shell message is normal
-for the bounded test.
-
-### GUI tests
+It covers x86_64, AArch64, and RISC-V boot markers, display fallback, and
+storage command wiring. The broader project suite is:
 
 ```sh
-tclsh emulator/test_ovd_gui.tcl
+./scripts/test.sh
 ```
 
-The GUI test suite performs static contract checks for SimpleFb text,
-VirtIO-GPU wiring, and required GUI controls. It does not open a GUI window.
+The test scripts intentionally terminate QEMU after expected boot markers.
+`Killed: 9` messages from those bounded idle-loop tests are expected.
 
 ## Troubleshooting
 
-- If an OVD does not exist, create it with `ovd_manager.sh create` first.
-- If the kernel ELF is missing, `ovd_run.sh` attempts an architecture-specific
-  CMake build; verify the corresponding toolchain file and LLVM installation.
-- If GUI mode fails on Linux, use `--no-gpu` or set `DISPLAY` correctly.
-- If a storage profile is not accepted, check the spelling against the six
-  supported values above.
-- Use `--dry-run` before launching to distinguish QEMU command construction
-  errors from kernel-driver or device-completion issues.
+### OVD does not exist
+
+Create or list devices:
+
+```sh
+./emulator/ovd_manager.sh list
+./emulator/ovd_manager.sh create --name phone --arch x86_64
+```
+
+### Configuration is invalid
+
+Run:
+
+```sh
+./emulator/ovd_manager.sh validate --name phone
+```
+
+Check architecture, RAM, disk size, storage profile, image path, and network
+profile.
+
+### QEMU is not found
+
+Install the architecture-specific QEMU system binary and confirm:
+
+```sh
+command -v qemu-system-x86_64
+command -v qemu-system-aarch64
+command -v qemu-system-riscv64
+```
+
+### Graphical mode does not open
+
+Use headless mode:
+
+```sh
+./emulator/ovd_run.sh run --name phone --no-gpu
+```
+
+On Linux, verify `DISPLAY`; on macOS, use Cocoa through the default GUI
+launcher.
+
+### Device is reported as already running
+
+Inspect state and stop it:
+
+```sh
+./emulator/ovd_manager.sh status --name phone
+./emulator/ovd_manager.sh stop --name phone --force
+```
+
+Review `state/qemu.pid`, `state/qemu.log`, and `state/command.argv` if the
+process is no longer present but stale state remains.
+
+### Storage profile fails at runtime
+
+First inspect the command:
+
+```sh
+./emulator/ovd_run.sh run --name phone --storage virtio --dry-run
+```
+
+Some profiles are currently command-construction and emulator-model tests;
+the corresponding kernel hardware driver may still be experimental or
+unimplemented.
+
+## Safety notes
+
+- OVD names are validated before filesystem operations.
+- Deleting a running OVD requires `--force`.
+- Use isolated roots for automated tests.
+- Stop devices before snapshot, clone, export, or delete operations.
+- Review imported archives before using them.
+- Never use a production disk image as an OVD backing image without a backup.
+- The emulator is a development tool; it is not a security boundary.

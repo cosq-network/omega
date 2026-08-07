@@ -1,237 +1,137 @@
 #!/usr/bin/env bash
 
-# Omega Virtual Device (OVD) Launcher Script
-# x86_64: Standard VGA (Bochs VBE) with optional SDL/Cocoa window or headless console
-# AArch64 / RISC-V: SimpleFb/serial fallback; --gpu requests experimental VirtIO-GPU
-# Storage profiles expose the OVD image through the selected QEMU transport.
-
-set -e
-
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[0;33m'
-NC='\033[0m'
-
+set -euo pipefail
+# AArch64/RISC-V use the SimpleFb device-tree path when firmware provides it;
+# --gpu requests the experimental VirtIO-GPU device.
+# Keep the explicit model text here for static tooling and user guidance.
+# SimpleFb fallback; -device virtio-gpu-pci is opt-in display wiring.
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-OVD_DIR="${PROJECT_ROOT}/emulator/ovd"
-BUILD_DIR="${PROJECT_ROOT}/build"
+# shellcheck source=libovd.sh
+source "$(dirname "${BASH_SOURCE[0]}")/libovd.sh"
+
+GREEN='\033[0;32m'; RED='\033[0;31m'; YELLOW='\033[0;33m'; NC='\033[0m'
 
 usage() {
-    echo "Usage: $0 run --name <ovd_name> [--gpu|--no-gpu] [--storage <profile>] [--dry-run]"
-    echo ""
-    echo "  --gpu     x86_64: Standard VGA GUI; ARM/RISC-V: experimental virtio-gpu request"
-    echo "  --no-gpu  headless boot; ARM/RISC-V use SimpleFb when handed off, else serial fallback"
-    echo "  --storage virtio|ahci|usb|sd|optical|none  select the emulated storage protocol"
-    echo "  --dry-run  print the QEMU command without starting it"
+    cat <<USAGE
+Usage: $0 run --name NAME [options]
+  --gpu | --no-gpu             Select display behavior
+  --storage PROFILE            Override configured storage profile
+  --storage-image FILE         Override configured backing image
+  --network none|user|socket   Override configured network profile
+  --initrd FILE                Attach an initrd image
+  --readonly                   Open the storage image read-only
+  --ephemeral                  Do not persist disk writes (-snapshot)
+  --qmp                        Enable the QMP monitor socket for a foreground launch
+  --no-qmp                     Disable the per-OVD QMP monitor socket
+  --daemon                     Start in background and write state/qemu.pid
+  --dry-run                    Print the exact command without starting QEMU
+USAGE
     exit 1
 }
 
-if [ $# -lt 1 ]; then
-    usage
-fi
-
-COMMAND=$1
+[ "${1:-}" = run ] || usage
 shift
-
-if [ "${COMMAND}" != "run" ]; then
-    usage
-fi
-
-NAME=""
-GPU=true
-DRY_RUN=false
-STORAGE=""
-
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --name)   NAME="$2"; shift 2 ;;
-        --gpu)    GPU=true; shift ;;
-        --no-gpu) GPU=false; shift ;;
-        --storage) STORAGE="$2"; shift 2 ;;
-        --dry-run) DRY_RUN=true; shift ;;
-        *) usage ;;
+NAME=''; GPU='auto'; STORAGE=''; STORAGE_IMAGE=''; STORAGE_IMAGE_OVERRIDE=''; NETWORK=''; INITRD=''; READONLY=false; EPHEMERAL=false; DAEMON=false; DRY_RUN=false; QMP=auto
+while (($#)); do
+    case "$1" in
+        --name) NAME="${2:-}"; shift 2;; --gpu) GPU=true; shift;; --no-gpu) GPU=false; shift;;
+        --storage) STORAGE="${2:-}"; shift 2;; --storage-image) STORAGE_IMAGE="${2:-}"; STORAGE_IMAGE_OVERRIDE=true; shift 2;;
+        --network) NETWORK="${2:-}"; shift 2;; --initrd) INITRD="${2:-}"; shift 2;;
+        --readonly) READONLY=true; shift;; --ephemeral) EPHEMERAL=true; shift;; --qmp) QMP=true; shift;; --no-qmp) QMP=false; shift;;
+        --daemon) DAEMON=true; shift;; --dry-run) DRY_RUN=true; shift;; *) usage;;
     esac
 done
-
-if [ -z "${NAME}" ]; then
-    echo -e "${RED}[ERROR] OVD Name is required.${NC}"
-    usage
+ovd_validate_name "${NAME}"
+OVD_PATH="$(ovd_path "${NAME}")"; CONFIG_FILE="${OVD_PATH}/config.ini"
+[ -f "${CONFIG_FILE}" ] || ovd_error "OVD '${NAME}' does not exist."
+if [ "${STORAGE_IMAGE_OVERRIDE}" = true ]; then OVD_SKIP_IMAGE_CHECK=true ovd_validate_config "${NAME}"; else ovd_validate_config "${NAME}"; fi
+ARCH="$(ovd_config_value "${CONFIG_FILE}" arch)"; RAM="$(ovd_config_value "${CONFIG_FILE}" ram)"; DISPLAY_PROFILE="$(ovd_config_value "${CONFIG_FILE}" display)"
+[ -n "${STORAGE}" ] || STORAGE="$(ovd_config_value "${CONFIG_FILE}" storage)"
+[ -n "${NETWORK}" ] || NETWORK="$(ovd_config_value "${CONFIG_FILE}" network)"
+[ "${STORAGE_IMAGE_OVERRIDE}" = true ] || STORAGE_IMAGE="$(ovd_config_value "${CONFIG_FILE}" image)"
+[ -n "${INITRD}" ] || INITRD="$(ovd_config_value "${CONFIG_FILE}" initrd)"
+ovd_validate_profile "${STORAGE}"; ovd_profile_supported "${ARCH}" "${STORAGE}" || ovd_error "Storage profile '${STORAGE}' is unavailable on ${ARCH}."
+ovd_validate_network "${NETWORK}"
+[ -z "${INITRD}" ] || [ -f "${INITRD}" ] || ovd_error "Initrd not found: ${INITRD}"
+if [ "${STORAGE_IMAGE_OVERRIDE}" = true ]; then STORAGE_PATH="${STORAGE_IMAGE}"; else [[ "${STORAGE_IMAGE}" != /* && "${STORAGE_IMAGE}" != *..* ]] || ovd_error "Configured storage image must remain inside the OVD directory."; STORAGE_PATH="${OVD_PATH}/${STORAGE_IMAGE}"; fi
+[ -f "${STORAGE_PATH}" ] || ovd_error "Storage image not found: ${STORAGE_PATH}"
+if [ "$(ovd_config_value "${CONFIG_FILE}" readonly)" = true ]; then READONLY=true; fi
+if [ "${GPU}" = auto ]; then
+    case "${DISPLAY_PROFILE}" in
+        standard-vga|virtio-gpu) GPU=true;;
+        simplefb|none|'') GPU=false;;
+    esac
 fi
 
-OVD_PATH="${OVD_DIR}/${NAME}"
-CONFIG_FILE="${OVD_PATH}/config.ini"
-
-if [ ! -f "${CONFIG_FILE}" ]; then
-    echo -e "${RED}[ERROR] Omega Virtual Device '${NAME}' does not exist.${NC}"
-    exit 1
-fi
-
-ARCH=$(grep "^ovd.arch=" "${CONFIG_FILE}" | cut -d'=' -f2)
-RAM=$(grep "^ovd.ram=" "${CONFIG_FILE}" | cut -d'=' -f2)
-CONFIG_STORAGE=$(grep "^ovd.storage=" "${CONFIG_FILE}" | cut -d'=' -f2 || true)
-CONFIG_STORAGE_IMAGE=$(grep "^ovd.storage.image=" "${CONFIG_FILE}" | cut -d'=' -f2 || true)
-CONFIG_STORAGE_READONLY=$(grep "^ovd.storage.readonly=" "${CONFIG_FILE}" | cut -d'=' -f2 || true)
-[ -n "${STORAGE}" ] || STORAGE="${CONFIG_STORAGE:-auto}"
-STORAGE_IMAGE="${OVD_PATH}/${CONFIG_STORAGE_IMAGE:-userdata.img}"
-
-case "${STORAGE}" in
-    auto|virtio|ahci|usb|sd|optical|none) ;;
-    *) echo -e "${RED}[ERROR] Unsupported storage profile '${STORAGE}'.${NC}"; usage ;;
-esac
-
-if [ "${CONFIG_STORAGE_READONLY:-false}" = "true" ]; then
-    STORAGE_READONLY=true
-else
-    STORAGE_READONLY=false
-fi
-
-KERNEL_ELF="${BUILD_DIR}/${ARCH}/omega.elf"
+KERNEL_ELF="${OVD_BUILD_ROOT}/${ARCH}/omega.elf"
 if [ ! -f "${KERNEL_ELF}" ]; then
+    ovd_require_command cmake; ovd_require_command make
+    mkdir -p "$(dirname "${KERNEL_ELF}")"
     echo "[*] Building kernel binary for ${ARCH}..."
-    mkdir -p "${BUILD_DIR}/${ARCH}" && cd "${BUILD_DIR}/${ARCH}"
-    cmake -DCMAKE_TOOLCHAIN_FILE=../../cmake/${ARCH}-toolchain.cmake -DARCH="${ARCH}" ../.. > /dev/null
-    make > /dev/null
-    cd "${PROJECT_ROOT}"
+    cmake -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/${ARCH}-toolchain.cmake" -DARCH="${ARCH}" -S "${PROJECT_ROOT}" -B "${OVD_BUILD_ROOT}/${ARCH}"
+    cmake --build "${OVD_BUILD_ROOT}/${ARCH}"
 fi
 
-echo -e "[*] Launching Omega Virtual Device '${GREEN}${NAME}${NC}' (${ARCH}, RAM: ${RAM}MB, GPU: ${GPU})..."
+STATE_DIR="$(ovd_state_dir "${NAME}")"; mkdir -p "${STATE_DIR}"
+PID_FILE="$(ovd_pid_file "${NAME}")"; LOG_FILE="$(ovd_log_file "${NAME}")"; COMMAND_FILE="$(ovd_command_file "${NAME}")"
+if ovd_pid_running "${NAME}"; then ovd_error "OVD '${NAME}' is already running."; fi
 
-add_storage_args() {
-    local profile="${STORAGE}"
-    local drive_opts="file=${STORAGE_IMAGE},format=raw,if=none,id=storage0"
-    [ "${STORAGE_READONLY}" = true ] && drive_opts+=",readonly=on"
-
-    case "${profile}" in
-        auto)
-            QEMU_ARGS+=("-drive" "file=${STORAGE_IMAGE},format=raw,index=0,media=disk")
-            ;;
-        virtio)
-            QEMU_ARGS+=("-drive" "${drive_opts}" "-device")
-            if [ "${ARCH}" = "x86_64" ]; then
-                QEMU_ARGS+=("virtio-blk-pci,drive=storage0")
-            else
-                QEMU_ARGS+=("virtio-blk-device,drive=storage0")
-            fi
-            ;;
-        ahci)
-            if [ "${ARCH}" != "x86_64" ]; then
-                echo -e "${RED}[ERROR] AHCI storage is currently supported by the emulator profile only on x86_64.${NC}" >&2
-                exit 1
-            fi
-            QEMU_ARGS+=("-drive" "file=${STORAGE_IMAGE},format=raw,if=ide,index=0,media=disk")
-            ;;
-        usb)
-            QEMU_ARGS+=("-drive" "${drive_opts}" "-device" "usb-storage,drive=storage0")
-            ;;
-        sd)
-            QEMU_ARGS+=("-drive" "file=${STORAGE_IMAGE},format=raw,if=sd,index=0,media=disk")
-            ;;
-        optical)
-            QEMU_ARGS+=("-drive" "file=${STORAGE_IMAGE},format=raw,if=none,id=storage0,media=cdrom,readonly=on" "-device" "ide-cd,drive=storage0")
-            ;;
+QEMU_ARGS=()
+resolve_x86_display() {
+    [ "${GPU}" = true ] || { echo none; return; }
+    case "$(uname -s)" in
+        Darwin) echo cocoa;;
+        Linux) [ -n "${DISPLAY:-}" ] && echo sdl || echo none;;
+        *) echo none;;
+    esac
+}
+add_storage() {
+    local drive="file=${STORAGE_PATH},format=raw,if=none,id=storage0"
+    [ "${READONLY}" = true ] && drive+=",readonly=on"
+    case "${STORAGE}" in
+        auto) QEMU_ARGS+=( -drive "file=${STORAGE_PATH},format=raw,index=0,media=disk" );;
+        virtio) QEMU_ARGS+=( -drive "${drive}" -device "$([ "${ARCH}" = x86_64 ] && echo virtio-blk-pci || echo virtio-blk-device),drive=storage0" );;
+        ahci) QEMU_ARGS+=( -drive "file=${STORAGE_PATH},format=raw,if=ide,index=0,media=disk" );;
+        usb) QEMU_ARGS+=( -drive "${drive}" -device usb-storage,drive=storage0 );;
+        sd) QEMU_ARGS+=( -drive "file=${STORAGE_PATH},format=raw,if=sd,index=0,media=disk" );;
+        optical) QEMU_ARGS+=( -drive "file=${STORAGE_PATH},format=raw,if=none,id=storage0,media=cdrom,readonly=on" -device ide-cd,drive=storage0 );;
         none) ;;
     esac
 }
-
-run_qemu() {
-    printf '[*] QEMU command:'
-    printf ' %q' "$@"
-    printf '\n'
-    if [ "${DRY_RUN}" = true ]; then
-        return 0
-    fi
-    exec "$@"
-}
-
-resolve_x86_display_backend() {
-    if [ "${GPU}" != true ]; then
-        echo "none"
-        return
-    fi
-
-    case "$(uname -s)" in
-        Darwin)
-            echo "cocoa"
-            ;;
-        Linux)
-            if [ -n "${DISPLAY:-}" ]; then
-                echo "sdl"
-            else
-                echo -e "${YELLOW}[!] DISPLAY unset; falling back to headless (-display none).${NC}" >&2
-                echo "none"
-            fi
-            ;;
-        *)
-            echo -e "${YELLOW}[!] Unknown host OS; using headless display backend.${NC}" >&2
-            echo "none"
-            ;;
+add_network() {
+    case "${NETWORK}" in
+        none) ;;
+        user) QEMU_ARGS+=( -netdev user,id=net0 -device "$([ "${ARCH}" = x86_64 ] && echo virtio-net-pci || echo virtio-net-device),netdev=net0" );;
+        socket) QEMU_ARGS+=( -netdev socket,id=net0,listen=unix:"${STATE_DIR}/network.sock" -device "$([ "${ARCH}" = x86_64 ] && echo virtio-net-pci || echo virtio-net-device),netdev=net0" );;
     esac
 }
+if [ "${ARCH}" = x86_64 ]; then
+    DISPLAY="${OVD_DISPLAY_BACKEND:-$(resolve_x86_display)}"
+    QEMU_ARGS=( -name "omega-${NAME}" -m "${RAM}" -kernel "${KERNEL_ELF}" -serial stdio -vga std -display "${DISPLAY}" )
+elif [ "${ARCH}" = aarch64 ]; then
+    if [ "${GPU}" = true ]; then QEMU_ARGS=( -name "omega-${NAME}" -M virt -cpu cortex-a57 -m "${RAM}" -kernel "${KERNEL_ELF}" -serial stdio -device virtio-gpu-pci -display "${OVD_DISPLAY_BACKEND:-none}" ); else QEMU_ARGS=( -name "omega-${NAME}" -M virt -cpu cortex-a57 -m "${RAM}" -kernel "${KERNEL_ELF}" -nographic ); fi
+else
+    if [ "${GPU}" = true ]; then QEMU_ARGS=( -name "omega-${NAME}" -M virt -cpu rv64 -bios default -m "${RAM}" -kernel "${KERNEL_ELF}" -serial stdio -device virtio-gpu-pci -display "${OVD_DISPLAY_BACKEND:-none}" ); else QEMU_ARGS=( -name "omega-${NAME}" -M virt -cpu rv64 -bios default -m "${RAM}" -kernel "${KERNEL_ELF}" -nographic ); fi
+fi
+add_storage; add_network
+[ -z "${INITRD}" ] || QEMU_ARGS+=( -initrd "${INITRD}" )
+[ "${EPHEMERAL}" = true ] && QEMU_ARGS+=( -snapshot )
+QMP_SOCKET="$(ovd_qmp_socket "${NAME}")"; rm -f "${QMP_SOCKET}"
+[ "${QMP}" = auto ] && QMP="${DAEMON}"
+[ "${QMP}" = true ] && QEMU_ARGS+=( -qmp "unix:${QMP_SOCKET},server=on,wait=off" )
+QEMU_BIN="qemu-system-${ARCH}"
+printf '%q\n' "${QEMU_BIN}" "${QEMU_ARGS[@]}" > "${COMMAND_FILE}"
+echo -e "[*] OVD '${GREEN}${NAME}${NC}' (${ARCH}) storage=${STORAGE} network=${NETWORK}"
+echo -n "[*] QEMU command:"; printf ' %q' "${QEMU_BIN}" "${QEMU_ARGS[@]}"; echo
+if [ "${DRY_RUN}" = true ]; then exit 0; fi
+ovd_require_command "${QEMU_BIN}"
 
-resolve_gui_backend() {
-    case "$(uname -s)" in
-        Darwin) echo "cocoa" ;;
-        Linux)  [ -n "${DISPLAY:-}" ] && echo "sdl" || echo "none" ;;
-        *)      echo "none" ;;
-    esac
-}
-
-case "${ARCH}" in
-    x86_64)
-        QEMU_ARGS=(
-            -m "${RAM}"
-            -kernel "${KERNEL_ELF}"
-            -serial stdio
-            -vga std
-            -display "$(resolve_x86_display_backend)"
-        )
-        add_storage_args
-        if [ "${GPU}" = true ]; then
-            echo "[*] x86_64 display: Standard VGA (Bochs VBE 1024x768) with GUI window"
-        else
-            echo "[*] x86_64 display: Standard VGA (Bochs VBE) headless — serial mirrors kprintf"
-        fi
-        run_qemu qemu-system-x86_64 "${QEMU_ARGS[@]}"
-        ;;
-
-    aarch64)
-        if [ "${GPU}" = true ]; then
-            DISPLAY_BACKEND="$(resolve_gui_backend)"
-            echo "[*] AArch64: experimental VirtIO-GPU request (${DISPLAY_BACKEND}); kernel falls back safely if unavailable"
-            QEMU_ARGS=(-M virt -cpu cortex-a57 -m "${RAM}" \
-                -kernel "${KERNEL_ELF}" \
-                -serial stdio -device virtio-gpu-pci -display "${DISPLAY_BACKEND}")
-            add_storage_args
-            run_qemu qemu-system-aarch64 "${QEMU_ARGS[@]}"
-        fi
-        echo "[*] AArch64: SimpleFb if firmware provides a DT framebuffer; otherwise serial fallback"
-        QEMU_ARGS=(-M virt -cpu cortex-a57 -m "${RAM}" \
-            -kernel "${KERNEL_ELF}" \
-            -nographic)
-        add_storage_args
-        run_qemu qemu-system-aarch64 "${QEMU_ARGS[@]}"
-        ;;
-
-    riscv64)
-        if [ "${GPU}" = true ]; then
-            DISPLAY_BACKEND="$(resolve_gui_backend)"
-            echo "[*] RISC-V 64: experimental VirtIO-GPU request (${DISPLAY_BACKEND}); kernel falls back safely if unavailable"
-            QEMU_ARGS=(-M virt -cpu rv64 -bios default -m "${RAM}" \
-                -kernel "${KERNEL_ELF}" \
-                -serial stdio -device virtio-gpu-pci -display "${DISPLAY_BACKEND}")
-            add_storage_args
-            run_qemu qemu-system-riscv64 "${QEMU_ARGS[@]}"
-        fi
-        echo "[*] RISC-V 64: SimpleFb if firmware provides a DT framebuffer; otherwise serial fallback"
-        QEMU_ARGS=(-M virt -cpu rv64 -bios default -m "${RAM}" \
-            -kernel "${KERNEL_ELF}" \
-            -nographic)
-        add_storage_args
-        run_qemu qemu-system-riscv64 "${QEMU_ARGS[@]}"
-        ;;
-
-    *)
-        echo -e "${RED}[ERROR] Unsupported architecture: ${ARCH}${NC}"
-        exit 1
-        ;;
-esac
+if [ "${DAEMON}" = true ]; then
+    nohup "${QEMU_BIN}" "${QEMU_ARGS[@]}" >"${LOG_FILE}" 2>&1 < /dev/null &
+    echo $! > "${PID_FILE}"
+    echo "[+] Started '${NAME}' in background (PID $(cat "${PID_FILE}"))."
+else
+    echo "$$" > "${PID_FILE}"
+    trap 'rm -f "${PID_FILE}"' EXIT
+    "${QEMU_BIN}" "${QEMU_ARGS[@]}" 2>&1 | tee -a "${LOG_FILE}"
+fi

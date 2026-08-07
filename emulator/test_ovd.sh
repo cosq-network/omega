@@ -51,7 +51,7 @@ run_ovd_test() {
         exit 1
     fi
 
-    if grep -q '^ovd.storage=virtio$' "${PROJECT_ROOT}/emulator/ovd/${name}/config.ini"; then
+    if grep -q '^ovd.storage.profile=virtio$' "${PROJECT_ROOT}/emulator/ovd/${name}/config.ini"; then
         echo -e "  [PASS] OVD '${name}' declares the VirtIO storage profile."
     else
         echo -e "  [${RED}FAIL${NC}] OVD '${name}' has no VirtIO storage profile."

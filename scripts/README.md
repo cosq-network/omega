@@ -17,8 +17,8 @@ the toolchain files in `cmake/` and target `x86_64`, `aarch64`, and `riscv64`.
 
 | Script | Purpose | Mutates repository artifacts? |
 | --- | --- | --- |
-| `run_qemu.sh` | Build-if-needed and launch the x86_64 kernel with display and storage options | No, except build output when missing |
-| `create_bootable_disk.sh` | Build all kernels and generate RAW/FAT32, QCOW2, VMDK, and VDI images | Yes: `build/` and `disk_images/` |
+| `run_qemu.sh` | Build-if-needed and launch the x86_64 kernel with display, storage, network, initrd, and lifecycle options | No, except build output when missing |
+| `create_bootable_disk.sh` | Build selected kernels and generate RAW/FAT32, QCOW2, VMDK, and VDI images | Yes: configured build/image roots |
 | `test_disk_images.sh` | Generate and validate bootable images and embedded payload paths | Yes: test images in `disk_images/` |
 | `test.sh` | Full multi-architecture, display, storage, script, and OVD regression suite | Yes: build/test logs and temporary OVD state |
 | `test_display.sh` | x86_64 Bochs VBE and VGA text-mode matrix | Build output and temporary QEMU logs |
@@ -26,6 +26,9 @@ the toolchain files in `cmake/` and target `x86_64`, `aarch64`, and `riscv64`.
 | `test_storage_unit.sh` | Host-side storage API, write-policy, and partition parser unit tests | `build/storage-tests/` |
 | `test_storage.sh` | Storage unit tests, all-ISA boot tests, and experimental VirtIO-Block builds | Build output and temporary QEMU logs |
 | `test_scripts_unit.sh` | Shell syntax, argument validation, dry-run launchers, and script contracts | Temporary files only |
+
+These scripts are stateless by design. Named device lifecycle, snapshots,
+QMP state, and GUI controls are provided by [`../emulator/README.md`](../emulator/README.md).
 
 ## QEMU launcher
 
@@ -42,7 +45,16 @@ the kernel first.
 ./scripts/run_qemu.sh --storage usb
 ./scripts/run_qemu.sh --storage none
 ./scripts/run_qemu.sh --storage virtio --dry-run
+./scripts/run_qemu.sh --storage-image /tmp/test.img --readonly --dry-run
+./scripts/run_qemu.sh --network user --initrd build/initrd.img --dry-run
+./scripts/run_qemu.sh --ephemeral --qmp
+./scripts/run_qemu.sh --no-build --dry-run
 ```
+
+Additional launcher options are `--network none|user|socket`, `--initrd
+FILE`, `--readonly`, `--ephemeral`, `--qmp`, `--no-build`, and
+`--dry-run`. The quick launcher is intentionally stateless; use the OVD
+manager for named devices, PID/log state, snapshots, and import/export.
 
 `--dry-run` prints the complete QEMU command and does not start QEMU. The
 launcher storage profiles are emulator wiring:
@@ -59,19 +71,33 @@ The backing image used by the launcher is
 `disk_images/omega-x86_64-bootable.img`. Create it with
 `create_bootable_disk.sh` when needed.
 
+The launcher also accepts `--gui`, `--text`, `--headless`, `--storage-image`,
+`--network`, `--initrd`, `--readonly`, `--ephemeral`, `--qmp`, `--dry-run`,
+and `--no-build`. It does not maintain PID or log state; use the OVD manager
+for managed `start`, `stop`, `status`, and `logs` operations.
+
 ## Disk image generation
 
 ```sh
 ./scripts/create_bootable_disk.sh
+./scripts/create_bootable_disk.sh --arch aarch64 --size 128
+./scripts/create_bootable_disk.sh --output-dir /tmp/omega-images --no-build
+./scripts/create_bootable_disk.sh --dry-run
 ./scripts/test_disk_images.sh
 ```
 
-The generator builds each architecture and creates a 64 MiB FAT32-compatible
+The generator builds each selected architecture and creates a configurable
+size FAT32-compatible
 raw image containing the architecture-specific EFI payload under
 `EFI/BOOT/` and the kernel under `boot/omega.elf`. If `qemu-img` is
 available, QCOW2, VMDK, and VDI conversions are also generated. If `mtools`
 is unavailable, the raw image is still created but FAT32 population and
 payload verification are limited by the host environment.
+
+Generator options are `--arch ARCH`, `--size MB`, `--output-dir DIR`,
+`--no-build`, and `--dry-run`. Existing build directories are reused instead
+of deleted. Selected image filenames are overwritten, so use `--output-dir`
+for experiments.
 
 ## Storage verification
 
@@ -96,6 +122,10 @@ VirtIO-Block configuration for AArch64 and RISC-V. The default kernels use
 the safe synthetic backend; the concrete NVMe, AHCI, SDHCI, USB MSC, ATAPI,
 and filesystem drivers remain planned milestones.
 
+QEMU test processes are tracked and cleaned up on exit. The tests reuse build
+directories instead of deleting them, making them safer for local development
+and parallel workflows.
+
 ## Full regression suite
 
 ```sh
@@ -108,13 +138,92 @@ processes are deliberately terminated after the expected boot markers are
 observed; `Killed: 9` from the shell is therefore expected during these
 bounded idle-loop tests.
 
+The OVD unit suite additionally covers safe-name/resource validation, schema
+compatibility, daemon state, fake-QEMU lifecycle, snapshots, clone,
+export/import, and GUI contracts. Use `OMEGA_OVD_ROOT` and
+`OMEGA_BUILD_ROOT` to isolate state in automation.
+
+The normal test order is:
+
+1. Multi-architecture kernel builds and boot assertions.
+2. x86_64 VGA and AArch64 display suites.
+3. Storage unit/integration tests and experimental VirtIO-Block builds.
+4. Shell-script unit tests.
+5. OVD unit, GUI contract, and lifecycle tests.
+
+Run a narrow suite while diagnosing failures:
+
+```sh
+./scripts/test_scripts_unit.sh
+./scripts/test_storage.sh
+./scripts/test_display.sh
+./emulator/test_ovd.sh
+```
+
+`test_disk_images.sh` regenerates disk images and should normally be run with
+an isolated `OMEGA_IMAGE_ROOT`.
+
 ## Conventions and safety
 
 - Use `bash script.sh` when the executable bit is unavailable.
 - Scripts fail fast with `set -e` or `set -euo pipefail`.
 - Unit tests use temporary directories and clean them with traps.
-- Image-generation scripts intentionally write under `build/` and
-  `disk_images/`; review those paths before running in automation.
+- Image-generation scripts intentionally write under `OMEGA_BUILD_ROOT` and
+  `OMEGA_IMAGE_ROOT`; review those paths before running in automation.
+- Set `OMEGA_BUILD_ROOT` and `OMEGA_IMAGE_ROOT` to isolate builds and images:
+
+  ```sh
+  export OMEGA_BUILD_ROOT="$PWD/.omega-test/build"
+  export OMEGA_IMAGE_ROOT="$PWD/.omega-test/images"
+  ```
+
+- `test.sh` no longer removes existing build directories.
 - No script enables experimental kernel drivers in the default build. Opt-in
   VirtIO-Block builds are isolated under dedicated build directories by
   `test_storage.sh`.
+
+## Troubleshooting
+
+Check dependencies:
+
+```sh
+command -v cmake
+command -v qemu-system-x86_64
+command -v qemu-system-aarch64
+command -v qemu-system-riscv64
+command -v qemu-img
+command -v mformat
+```
+
+`qemu-img` is required for converted image formats. `mtools` is required to
+populate and inspect FAT32 payloads. Raw images can still be generated
+without either optional dependency.
+
+If a kernel ELF is missing, build directly with full output:
+
+```sh
+cmake -S . -B build/x86_64 \
+  -DCMAKE_TOOLCHAIN_FILE=cmake/x86_64-toolchain.cmake \
+  -DARCH=x86_64
+cmake --build build/x86_64
+```
+
+Use `--no-build` when the launcher should fail immediately instead of
+configuring a build. Use `--dry-run` to inspect QEMU arguments without
+executing QEMU.
+
+Common outputs include:
+
+```text
+build/<arch>/omega.elf
+build/<arch>_test.log
+build/<arch>_storage_test.log
+build/x86_64/display_test.log
+build/storage-tests/
+disk_images/omega-*-bootable.*
+```
+
+The full test suite intentionally terminates QEMU after expected boot
+markers. Shell messages such as `Killed: 9` are expected for these bounded
+idle-loop tests. Never point image-generation or test scripts at production
+disks; use `OMEGA_BUILD_ROOT` and `OMEGA_IMAGE_ROOT` for isolated workflows.

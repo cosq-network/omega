@@ -55,14 +55,18 @@ pack .main.left -side left -fill both -expand true -padx {0 10}
 ttk::label .main.left.lbl -text "Configured Virtual Devices" -style TLabel -font {"Helvetica" 12 "bold"}
 pack .main.left.lbl -side top -anchor w -pady {0 10}
 
-ttk::treeview .main.left.tree -columns {arch ram disk} -show headings -height 15
+ttk::treeview .main.left.tree -columns {arch ram disk storage state} -show headings -height 15
 .main.left.tree heading arch -text "Architecture"
 .main.left.tree heading ram -text "RAM (MB)"
 .main.left.tree heading disk -text "Disk (MB)"
+.main.left.tree heading storage -text "Storage"
+.main.left.tree heading state -text "State"
 
 .main.left.tree column arch -width 120 -anchor center
 .main.left.tree column ram -width 100 -anchor center
 .main.left.tree column disk -width 100 -anchor center
+.main.left.tree column storage -width 100 -anchor center
+.main.left.tree column state -width 85 -anchor center
 
 pack .main.left.tree -fill both -expand true -side top
 
@@ -101,6 +105,18 @@ entry .main.right.disk_entry -bg "#313244" -fg "#CDD6F4" -insertbackground "#CDD
 .main.right.disk_entry insert 0 "64"
 pack .main.right.disk_entry -side top -fill x -pady {0 15}
 
+ttk::label .main.right.storage_lbl -text "Storage Profile:" -style TLabel
+pack .main.right.storage_lbl -side top -anchor w
+ttk::combobox .main.right.storage_combo -values {virtio ahci usb sd optical none} -state readonly
+.main.right.storage_combo set "virtio"
+pack .main.right.storage_combo -side top -fill x -pady {0 10}
+
+ttk::label .main.right.network_lbl -text "Network Profile:" -style TLabel
+pack .main.right.network_lbl -side top -anchor w
+ttk::combobox .main.right.network_combo -values {none user socket} -state readonly
+.main.right.network_combo set "none"
+pack .main.right.network_combo -side top -fill x -pady {0 15}
+
 # Create Button
 button .main.right.btn_create -text "Create Virtual Device" -bg $accent_green -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command create_device
 pack .main.right.btn_create -side top -fill x -pady {0 20}
@@ -119,6 +135,12 @@ pack .main.right.btn_run_gui -side top -fill x -pady {0 8}
 button .main.right.btn_run_head -text "Launch (Headless / SimpleFb fallback)" -bg "#89DCEB" -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command run_device_headless
 pack .main.right.btn_run_head -side top -fill x -pady {0 8}
 
+button .main.right.btn_stop -text "Stop Selected Device" -bg "#F9E2AF" -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command stop_device
+pack .main.right.btn_stop -side top -fill x -pady {0 8}
+
+button .main.right.btn_logs -text "View Selected Device Logs" -bg "#BAC2DE" -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command show_device_logs
+pack .main.right.btn_logs -side top -fill x -pady {0 8}
+
 button .main.right.btn_delete -text "Delete Selected Device" -bg $accent_red -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command delete_device
 pack .main.right.btn_delete -side top -fill x
 
@@ -133,6 +155,8 @@ proc refresh_device_list {} {
     set current_arch ""
     set current_ram ""
     set current_disk ""
+    set current_storage ""
+    set current_state ""
 
     foreach line [split $output "\n"] {
         if {[string match "Device: *" $line]} {
@@ -143,9 +167,11 @@ proc refresh_device_list {} {
             set current_ram [string range $line 10 end]
         } elseif {[string match "  ovd.disk=*" $line]} {
             set current_disk [string range $line 11 end]
-            if {$current_name ne ""} {
-                .main.left.tree insert {} end -id $current_name -values [list $current_arch $current_ram $current_disk]
-            }
+        } elseif {[string match "  ovd.storage=*" $line]} {
+            set current_storage [string range $line 14 end]
+        } elseif {[string match "  ovd.state=*" $line]} {
+            set current_state [string range $line 12 end]
+            if {$current_name ne ""} {.main.left.tree insert {} end -id $current_name -values [list $current_arch $current_ram $current_disk $current_storage $current_state]}
         }
     }
 }
@@ -155,6 +181,8 @@ proc create_device {} {
     set arch [.main.right.arch_combo get]
     set ram [.main.right.ram_entry get]
     set disk [.main.right.disk_entry get]
+    set storage [.main.right.storage_combo get]
+    set network [.main.right.network_combo get]
 
     if {$name eq ""} {
         tk_messageBox -icon error -message "Please enter a valid Device Name."
@@ -162,7 +190,7 @@ proc create_device {} {
     }
 
     set script_path "[file dirname [info script]]/ovd_manager.sh"
-    if {[catch {exec bash $script_path create --name $name --arch $arch --ram $ram --disk $disk} res]} {
+    if {[catch {exec bash $script_path create --name $name --arch $arch --ram $ram --disk $disk --storage $storage --network $network} res]} {
         tk_messageBox -icon error -message "Failed to create OVD device:\n$res"
     } else {
         refresh_device_list
@@ -183,14 +211,36 @@ proc run_device_gui {} {
     set dev [get_selected_device]
     if {$dev eq ""} return
     set script_path "[file dirname [info script]]/ovd_run.sh"
-    exec bash $script_path run --name $dev --gpu &
+    exec bash $script_path run --name $dev --gpu --daemon &
 }
 
 proc run_device_headless {} {
     set dev [get_selected_device]
     if {$dev eq ""} return
     set script_path "[file dirname [info script]]/ovd_run.sh"
-    exec bash $script_path run --name $dev --no-gpu &
+    exec bash $script_path run --name $dev --no-gpu --daemon &
+}
+
+proc stop_device {} {
+    set dev [get_selected_device]
+    if {$dev eq ""} return
+    set script_path "[file dirname [info script]]/ovd_manager.sh"
+    if {[catch {exec bash $script_path stop --name $dev} res]} {
+        tk_messageBox -icon error -message "Failed to stop OVD device:\n$res"
+    } else {
+        refresh_device_list
+    }
+}
+
+proc show_device_logs {} {
+    set dev [get_selected_device]
+    if {$dev eq ""} return
+    set script_path "[file dirname [info script]]/ovd_manager.sh"
+    if {[catch {exec bash $script_path logs --name $dev} res]} {
+        tk_messageBox -icon info -message "No emulator log is available yet."
+    } else {
+        tk_messageBox -title "OVD Logs: $dev" -message $res
+    }
 }
 
 proc delete_device {} {
@@ -204,5 +254,9 @@ proc delete_device {} {
     }
 }
 
-# Initial List Refresh
-refresh_device_list
+# Initial and periodic list refresh
+proc schedule_refresh {} {
+    refresh_device_list
+    after 2000 schedule_refresh
+}
+schedule_refresh

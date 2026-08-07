@@ -5,7 +5,7 @@
 # x86_64 runs include Standard VGA verification; AArch64/RISC-V runs include
 # SimpleFb-capable HAL and serial-fallback verification.
 
-set -e
+set -euo pipefail
 
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -59,23 +59,19 @@ run_test() {
     fi
 }
 
-# 1. Build All Architectures
+# 1. Build All Architectures without deleting existing build directories.
 echo "[*] Building x86_64 kernel binary..."
-rm -rf "${BUILD_DIR}/x86_64" && mkdir -p "${BUILD_DIR}/x86_64" && cd "${BUILD_DIR}/x86_64"
-cmake -DCMAKE_TOOLCHAIN_FILE=../../cmake/x86_64-toolchain.cmake -DARCH=x86_64 ../.. > /dev/null
-make > /dev/null
+cmake -S "${PROJECT_ROOT}" -B "${BUILD_DIR}/x86_64" -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/x86_64-toolchain.cmake" -DARCH=x86_64 > /dev/null
+cmake --build "${BUILD_DIR}/x86_64" > /dev/null
 
 echo "[*] Building AArch64 kernel binary..."
-rm -rf "${BUILD_DIR}/aarch64" && mkdir -p "${BUILD_DIR}/aarch64" && cd "${BUILD_DIR}/aarch64"
-cmake -DCMAKE_TOOLCHAIN_FILE=../../cmake/aarch64-toolchain.cmake -DARCH=aarch64 ../.. > /dev/null
-make > /dev/null
+cmake -S "${PROJECT_ROOT}" -B "${BUILD_DIR}/aarch64" -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/aarch64-toolchain.cmake" -DARCH=aarch64 > /dev/null
+cmake --build "${BUILD_DIR}/aarch64" > /dev/null
 
 echo "[*] Building RISC-V 64 kernel binary..."
-rm -rf "${BUILD_DIR}/riscv64" && mkdir -p "${BUILD_DIR}/riscv64" && cd "${BUILD_DIR}/riscv64"
-cmake -DCMAKE_TOOLCHAIN_FILE=../../cmake/riscv64-toolchain.cmake -DARCH=riscv64 ../.. > /dev/null
-make > /dev/null
+cmake -S "${PROJECT_ROOT}" -B "${BUILD_DIR}/riscv64" -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/riscv64-toolchain.cmake" -DARCH=riscv64 > /dev/null
+cmake --build "${BUILD_DIR}/riscv64" > /dev/null
 
-cd "${PROJECT_ROOT}"
 
 # 2. x86_64 Integration Test Suite (Standard VGA -vga std, headless display)
 run_test "x86_64" \

@@ -1,98 +1,101 @@
 #!/usr/bin/env bash
 
-# Quick QEMU launcher for Omega x86_64 kernel with Standard VGA support.
-# Usage:
-#   ./scripts/run_qemu.sh              # headless Bochs VBE (-vga std -display none)
-#   ./scripts/run_qemu.sh --gui        # graphical window (SDL/Cocoa)
-#   ./scripts/run_qemu.sh --text       # VGA text mode only (-vga none)
-#   ./scripts/run_qemu.sh --storage virtio|ahci|usb|none
+# Quick x86_64 QEMU launcher. For named devices and lifecycle state, use the
+# OVD launcher under emulator/ovd_run.sh instead.
 
-set -e
+set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BUILD_DIR="${PROJECT_ROOT}/build/x86_64"
+BUILD_ROOT="${OMEGA_BUILD_ROOT:-${PROJECT_ROOT}/build}"
+IMAGE_ROOT="${OMEGA_IMAGE_ROOT:-${PROJECT_ROOT}/disk_images}"
+BUILD_DIR="${BUILD_ROOT}/x86_64"
 KERNEL="${BUILD_DIR}/omega.elf"
+DEFAULT_IMAGE="${IMAGE_ROOT}/omega-x86_64-bootable.img"
 
-MODE="headless"
-STORAGE="auto"
+MODE=headless
+STORAGE=auto
+STORAGE_IMAGE="${DEFAULT_IMAGE}"
+NETWORK=none
+INITRD=""
+READONLY=false
+EPHEMERAL=false
+QMP=false
 DRY_RUN=false
+NO_BUILD=false
 
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --gui)  MODE="gui"; shift ;;
-        --text) MODE="text"; shift ;;
-        --storage) STORAGE="$2"; shift 2 ;;
-        --dry-run) DRY_RUN=true; shift ;;
-        *) echo "Unknown option: $1"; exit 1 ;;
+usage() {
+    cat <<USAGE
+Usage: $0 [options]
+  --gui | --text | --headless     Select display mode (default: headless)
+  --storage PROFILE               auto|virtio|ahci|usb|none
+  --storage-image FILE            Backing image override
+  --network PROFILE               none|user|socket
+  --initrd FILE                   Attach an initrd
+  --readonly                      Open storage read-only
+  --ephemeral                     Discard disk writes with QEMU -snapshot
+  --qmp                           Enable a QMP socket under build/x86_64
+  --dry-run                       Print the command without starting QEMU
+  --no-build                      Fail if the kernel ELF is missing
+USAGE
+    exit 1
+}
+
+while (($#)); do
+    case "$1" in
+        --gui) MODE=gui; shift;; --text) MODE=text; shift;; --headless) MODE=headless; shift;;
+        --storage) STORAGE="${2:-}"; shift 2;; --storage-image) STORAGE_IMAGE="${2:-}"; shift 2;;
+        --network) NETWORK="${2:-}"; shift 2;; --initrd) INITRD="${2:-}"; shift 2;;
+        --readonly) READONLY=true; shift;; --ephemeral) EPHEMERAL=true; shift;;
+        --qmp) QMP=true; shift;; --dry-run) DRY_RUN=true; shift;; --no-build) NO_BUILD=true; shift;;
+        *) usage;;
     esac
 done
 
+case "${STORAGE}" in auto|virtio|ahci|usb|none) ;; *) echo "Unsupported storage profile: ${STORAGE}" >&2; exit 1;; esac
+case "${NETWORK}" in none|user|socket) ;; *) echo "Unsupported network profile: ${NETWORK}" >&2; exit 1;; esac
+[ -z "${INITRD}" ] || [ -f "${INITRD}" ] || { echo "Initrd not found: ${INITRD}" >&2; exit 1; }
+
 if [ ! -f "${KERNEL}" ]; then
+    [ "${NO_BUILD}" = false ] || { echo "Kernel not found: ${KERNEL}" >&2; exit 1; }
+    command -v cmake >/dev/null 2>&1 || { echo "Required command not found: cmake" >&2; exit 1; }
     echo "[*] Building x86_64 kernel..."
-    mkdir -p "${BUILD_DIR}"
-    cd "${BUILD_DIR}"
-    cmake -DCMAKE_TOOLCHAIN_FILE=../../cmake/x86_64-toolchain.cmake -DARCH=x86_64 ../.. > /dev/null
-    make > /dev/null
+    cmake -S "${PROJECT_ROOT}" -B "${BUILD_DIR}" \
+        -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/x86_64-toolchain.cmake" \
+        -DARCH=x86_64
+    cmake --build "${BUILD_DIR}"
 fi
 
-case "${STORAGE}" in
-    auto|virtio|ahci|usb|none) ;;
-    *) echo "Unsupported storage profile: ${STORAGE}"; exit 1 ;;
-esac
-
-add_storage_args() {
-    case "${STORAGE}" in
-        auto) QEMU_ARGS+=("-drive" "file=${PROJECT_ROOT}/disk_images/omega-x86_64-bootable.img,format=raw,index=0,media=disk") ;;
-        virtio) QEMU_ARGS+=("-drive" "file=${PROJECT_ROOT}/disk_images/omega-x86_64-bootable.img,format=raw,if=none,id=storage0" "-device" "virtio-blk-pci,drive=storage0") ;;
-        ahci) QEMU_ARGS+=("-drive" "file=${PROJECT_ROOT}/disk_images/omega-x86_64-bootable.img,format=raw,if=ide,index=0,media=disk") ;;
-        usb) QEMU_ARGS+=("-drive" "file=${PROJECT_ROOT}/disk_images/omega-x86_64-bootable.img,format=raw,if=none,id=storage0" "-device" "usb-storage,drive=storage0") ;;
-        none) ;;
-    esac
-}
-
-run_qemu() {
-    printf '[*] QEMU command:'
-    printf ' %q' "$@"
-    printf '\n'
-    [ "${DRY_RUN}" = true ] || exec "$@"
-}
-
+QEMU_ARGS=( -name omega-quick-x86_64 -kernel "${KERNEL}" -serial stdio )
 case "${MODE}" in
     gui)
-        case "$(uname -s)" in
-            Darwin) DISPLAY_BACKEND="cocoa" ;;
-            *)      DISPLAY_BACKEND="sdl" ;;
-        esac
-        echo "[*] Launching with Standard VGA GUI (${DISPLAY_BACKEND})..."
-        QEMU_ARGS=(
-            -kernel "${KERNEL}" \
-            -serial stdio \
-            -vga std \
-            -display "${DISPLAY_BACKEND}"
-        )
-        add_storage_args
-        run_qemu qemu-system-x86_64 "${QEMU_ARGS[@]}"
+        case "$(uname -s)" in Darwin) backend=cocoa;; Linux) backend="${DISPLAY:+sdl}"; backend="${backend:-none}";; *) backend=none;; esac
+        QEMU_ARGS+=( -vga std -display "${backend}" )
         ;;
-    text)
-        echo "[*] Launching with VGA text mode only (-vga none)..."
-        QEMU_ARGS=(
-            -kernel "${KERNEL}" \
-            -serial stdio \
-            -display none \
-            -vga none
-        )
-        add_storage_args
-        run_qemu qemu-system-x86_64 "${QEMU_ARGS[@]}"
-        ;;
-    headless)
-        echo "[*] Launching headless with Bochs VBE (-vga std -display none)..."
-        QEMU_ARGS=(
-            -kernel "${KERNEL}" \
-            -serial stdio \
-            -display none \
-            -vga std
-        )
-        add_storage_args
-        run_qemu qemu-system-x86_64 "${QEMU_ARGS[@]}"
-        ;;
+    text) QEMU_ARGS+=( -display none -vga none );;
+    headless) QEMU_ARGS+=( -display none -vga std );;
 esac
+
+if [ "${STORAGE}" != none ]; then
+    [ "${READONLY}" = true ] && readonly_arg=",readonly=on" || readonly_arg=""
+    case "${STORAGE}" in
+        auto) QEMU_ARGS+=( -drive "file=${STORAGE_IMAGE},format=raw,index=0,media=disk${readonly_arg}" );;
+        virtio) QEMU_ARGS+=( -drive "file=${STORAGE_IMAGE},format=raw,if=none,id=storage0${readonly_arg}" -device virtio-blk-pci,drive=storage0 );;
+        ahci) QEMU_ARGS+=( -drive "file=${STORAGE_IMAGE},format=raw,if=ide,index=0,media=disk${readonly_arg}" );;
+        usb) QEMU_ARGS+=( -drive "file=${STORAGE_IMAGE},format=raw,if=none,id=storage0${readonly_arg}" -device usb-storage,drive=storage0 );;
+    esac
+fi
+case "${NETWORK}" in
+    user) QEMU_ARGS+=( -netdev user,id=net0 -device virtio-net-pci,netdev=net0 );;
+    socket) QEMU_ARGS+=( -netdev socket,id=net0,listen=unix:"${BUILD_DIR}/network.sock" -device virtio-net-pci,netdev=net0 );;
+esac
+[ -z "${INITRD}" ] || QEMU_ARGS+=( -initrd "${INITRD}" )
+[ "${EPHEMERAL}" = true ] && QEMU_ARGS+=( -snapshot )
+if [ "${QMP}" = true ]; then
+    mkdir -p "${BUILD_DIR}"; rm -f "${BUILD_DIR}/quick.qmp.sock"
+    QEMU_ARGS+=( -qmp "unix:${BUILD_DIR}/quick.qmp.sock,server=on,wait=off" )
+fi
+
+printf '[*] QEMU command:'; printf ' %q' qemu-system-x86_64 "${QEMU_ARGS[@]}"; printf '\n'
+[ "${DRY_RUN}" = true ] && exit 0
+command -v qemu-system-x86_64 >/dev/null 2>&1 || { echo "Required command not found: qemu-system-x86_64" >&2; exit 1; }
+exec qemu-system-x86_64 "${QEMU_ARGS[@]}"

@@ -30,7 +30,7 @@ Phases **1–6** cover the research-kernel foundation (completed). Phases **7–
 | **Phase 5.5: VirtIO Network Stack** | `COMPLETED` | VirtIO-Net packet driver & TCP/IP stack | L2 Ethernet, L3 IPv4, L4 UDP/TCP headers | Frame RX Reader |
 | **Phase 6A: Bootable Disk Generator** | `COMPLETED` | UEFI/GPT multi-format disk generator | RAW, QCOW2, VMDK, VDI with FAT32 payloads | `create_bootable_disk.sh` |
 | **Phase 6B: Firmware Compatibility** | `COMPLETED` | U-Boot (`bootefi`/`booti`) & Coreboot (EDK2/GRUB) | Embedded `/EFI/BOOT/` & `/boot/omega.elf` | `docs/FIRMWARE_BOOT.md` |
-| **Phase 6C: OVD Emulator & GUI** | `COMPLETED` | Omega Virtual Device Manager & Tcl/Tk GUI; multi-architecture display and storage transport wiring | CLI manager, `--gpu` / `--no-gpu`, `--storage` profiles, `--dry-run`, Tcl/Tk GUI | `test_ovd_unit.sh`, `test_ovd.sh`, `test_ovd_gui.tcl` |
+| **Phase 6C: OVD Emulator & GUI** | `COMPLETED` | Omega Virtual Device Manager & Tcl/Tk GUI; multi-architecture display, storage, networking, and lifecycle tooling | Schema validation, safe paths, `--gpu` / `--no-gpu`, storage/network profiles, daemon/QMP state, snapshots, import/export, dry-run, GUI status/log controls | `test_ovd_unit.sh`, `test_ovd.sh`, `test_ovd_gui.tcl` |
 | **Phase 6D: Containerization & CI/CD** | `COMPLETED` | Alpine Dockerfile, DevContainers, GitHub Actions | DevContainers, Codespaces, GitHub Actions CI/CD incl. `test_display.sh` | `.github/workflows/ci.yml` |
 
 ---
@@ -95,6 +95,7 @@ The storage roadmap is defined in [`docs/STORAGE_ARCHITECTURE_PLAN.md`](STORAGE_
 | **7.1f SDHCI and USB Mass Storage** | `PLANNED` | SD/microSD, xHCI, BOT/UAS, USB flash and optical media |
 | **7.1g Controlled writes** | `PARTIAL` | Common writable/read-only policy, FUA/barrier flags, flush dispatch, and synthetic write tests; filesystem/hardware writes remain |
 | **7.1h Storage emulator and test harness** | `COMPLETED` | QEMU storage profiles in OVD and x86 launcher; script/OVD unit tests, dry-run command inspection, and all-ISA storage integration tests |
+| **7.1i Emulator manageability and UX** | `COMPLETED` | OVD schema validation, configurable roots, lifecycle state, daemon logs, QMP monitor support, networking, initrd, ephemeral mode, snapshots, clone/import/export, and GUI controls |
 
 ### Current Phase 7.1 implementation boundary
 
@@ -111,6 +112,8 @@ Implemented and verified:
 - QEMU/OVD storage transport wiring and dry-run inspection for the supported
   emulator profiles.
 - Unit and integration coverage across x86_64, AArch64, and RISC-V.
+- Emulator unit, GUI contract, and three-architecture lifecycle coverage,
+  including daemon state, fake-tool dispatch, and cleanup behavior.
 
 Not yet implemented:
 
@@ -403,7 +406,7 @@ Concrete sequence mapped to the existing codebase:
 5. **Port musl (or minimal libc)** — Expand syscalls to POSIX subset required by libc.
 6. **Extend graphical console** — Scrollback, ANSI colors, userspace compositor path (kernel FB console is in place).
 7. **Freeze v1 ABI** — Document and version the syscall and IPC interfaces (`docs/ABI.md`).
-8. **Extend OVD emulator** — x86_64 Standard VGA and cross-architecture storage profiles are wired; next add validated VirtIO-Block runtime completion, VirtIO-GPU + SimpleFb for AArch64/RISC-V, and device hotplug scenarios.
+8. **Extend OVD emulator** — lifecycle management, storage/network profiles, QMP state, snapshots, import/export, and GUI controls are now wired; next add validated VirtIO-Block runtime completion, VirtIO-GPU + SimpleFb for AArch64/RISC-V, device hotplug scenarios, and richer QEMU machine capability detection.
 9. **Defer phone work** — Until laptop/tablet daily-driver quality is demonstrated.
 
 ---
