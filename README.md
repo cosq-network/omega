@@ -25,9 +25,11 @@
 - **VirtIO Network Stack**: VirtIO-Net packet reader, Ethernet L2, IPv4 L3, and UDP/TCP L4 stack headers.
 - **System Display Module (x86_64 Standard VGA)**: Layered display HAL with VGA text mode (80×25 at `0xB8000`), Bochs VBE linear framebuffer (1024×768×32 via DISPI), Multiboot2 framebuffer handoff, 8×16 bitmap font, and a kernel graphical console. `kprintf` output is mirrored to serial (COM1) and the active display backend concurrently.
 - **AArch64/RISC-V Display Integration**: Shared FDT walker and boot-pointer handoff, Device Tree `simple-framebuffer` HALs, pixel-format metadata, portable framebuffer console routing, and safe serial fallback. An opt-in VirtIO-GPU MMIO 2D bring-up path is included with `-DENABLE_EXPERIMENTAL_VIRTIO_GPU=ON`.
+- **Cross-Architecture Storage Foundation**: Common block requests, device lifecycle and driver registration, DMA mapping, GPT/MBR parsing, writable/read-only policy, flush/barrier handling, and a synthetic block backend verified on x86_64, AArch64, and RISC-V.
+- **Experimental VirtIO-Block Path**: Opt-in VirtIO-MMIO block discovery and read/write/flush request encoding with AArch64/RISC-V cross-build coverage. Enable with `-DENABLE_EXPERIMENTAL_VIRTIO_BLOCK=ON` while queue completion validation continues.
 - **Firmware & Bootloader Compatibility**: Compatible with **UEFI/GPT**, **U-Boot** (`bootefi` / `booti`), and **Coreboot** (TianoCore / GRUB).
 - **Multi-Format Virtual Disk Image Generator**: Generates RAW (`.img`), QCOW2 (`.qcow2`), VMDK (`.vmdk`), and VDI (`.vdi`) disk images with embedded FAT32 payloads (`/EFI/BOOT/` and `/boot/omega.elf`).
-- **Omega Virtual Device (OVD) Manager & GUI**: Android-like virtual device manager CLI (`emulator/ovd_manager.sh`), launcher with Standard VGA support (`emulator/ovd_run.sh --gpu` / `--no-gpu`), and Tcl/Tk GUI application (`emulator/ovd_gui.tcl`).
+- **Omega Virtual Device (OVD) Manager & GUI**: Android-like virtual device manager CLI (`emulator/ovd_manager.sh`), Standard VGA/SimpleFb launcher, selectable QEMU storage profiles (`virtio`, `ahci`, `usb`, `sd`, `optical`, `none`), and Tcl/Tk GUI application (`emulator/ovd_gui.tcl`).
 - **Containerization & CI/CD**: Minimal Alpine-based `Dockerfile`, VSCode DevContainers/Codespaces (`.devcontainer/devcontainer.json`), and GitHub Actions CI/CD (`.github/workflows/ci.yml`).
 
 ---
@@ -49,10 +51,13 @@
 | :--- | :--- | :--- | :--- |
 | [`docs/VGA_DISPLAY_PLAN.md`](docs/VGA_DISPLAY_PLAN.md) | x86_64 Standard VGA | 7.2 | **Implemented** |
 | [`docs/DISPLAY_AARCH64_RISCV_PLAN.md`](docs/DISPLAY_AARCH64_RISCV_PLAN.md) | AArch64 & RISC-V 64 | 7.2b | **SimpleFb integrated; guarded VirtIO-GPU foundation** |
+| [`docs/STORAGE_ARCHITECTURE_PLAN.md`](docs/STORAGE_ARCHITECTURE_PLAN.md) | All architectures | 7.1+ | **Storage architecture and implementation plan** |
 
 **x86_64 (Phase 7.2 — done):** VGA text mode, Bochs VBE linear FB, Multiboot2 handoff, dual serial+display console.
 
 **AArch64 / RISC-V (Phase 7.2b — in progress):** Shared FDT parsing, boot-time DT pointer handoff, SimpleFb HALs, serial fallback, and portable framebuffer-console integration are implemented. VirtIO-GPU and UEFI GOP handoff remain planned.
+
+**Storage:** The architecture and initial implementation are specified in [`docs/STORAGE_ARCHITECTURE_PLAN.md`](docs/STORAGE_ARCHITECTURE_PLAN.md). The common layer is implemented and tested; GPT/MBR parsing, synthetic writes/flushes, and guarded VirtIO-Block request paths are available. NVMe, AHCI/SATA/ATAPI, SDHCI, USB Mass Storage, filesystem mounting, and hardware-specific writes remain subsequent milestones.
 
 | Layer | Location | Role |
 | :--- | :--- | :--- |
@@ -67,6 +72,7 @@
 ./scripts/run_qemu.sh              # headless Bochs VBE: -vga std -display none
 ./scripts/run_qemu.sh --gui        # graphical window (SDL / Cocoa)
 ./scripts/run_qemu.sh --text       # VGA text fallback: -vga none
+./scripts/run_qemu.sh --storage virtio --dry-run  # inspect x86_64 VirtIO disk wiring
 ```
 
 ### 3. System Call ABI Conventions (`docs/ABI.md`)
@@ -98,28 +104,35 @@ omega/
 │   ├── RUNNING.md                 # QEMU Execution & Build Guide
 │   ├── VGA_DISPLAY_PLAN.md        # SDM — x86_64 Standard VGA (Phase 7.2)
 │   ├── DISPLAY_AARCH64_RISCV_PLAN.md  # SDM — AArch64/RISC-V extension (Phase 7.2b)
+│   ├── STORAGE_ARCHITECTURE_PLAN.md   # Cross-architecture storage architecture
 │   └── COMPLETION_REPORT.md       # Final Verification Report
 ├── emulator/
+│   ├── README.md                  # OVD manager, storage profiles, and tests
 │   ├── ovd_gui.tcl                # Tcl/Tk Omega Virtual Device Manager GUI
 │   ├── ovd_manager.sh             # OVD Device Creator & Registry CLI
-│   ├── ovd_run.sh                 # OVD Launcher (x86: -vga std; --gpu / --no-gpu)
-│   ├── test_ovd.sh                # Automated OVD Integration Test Suite
+│   ├── ovd_run.sh                 # OVD Launcher (display + storage profiles)
+│   ├── test_ovd_unit.sh           # OVD config and dry-run command unit tests
+│   ├── test_ovd.sh                # OVD lifecycle, storage transport, and boot tests
 │   └── test_ovd_gui.tcl           # Tcl/Tk GUI Unit Test Suite
 ├── scripts/
+│   ├── README.md                  # Script catalog, usage, and verification guide
 │   ├── create_bootable_disk.sh    # UEFI GPT Disk Image Generator
 │   ├── run_qemu.sh                # Quick x86_64 QEMU launcher (VGA modes)
 │   ├── test.sh                    # Multi-Arch QEMU Integration Tests (+ display)
 │   ├── test_display.sh            # VGA / System Display Module test matrix
 │   ├── test_display_aarch64.sh    # AArch64 display HAL/fallback smoke test
+│   ├── test_storage_unit.sh       # Host storage API/partition unit tests
+│   ├── test_storage.sh            # Storage unit + all-ISA QEMU integration tests
+│   ├── test_scripts_unit.sh       # Shell-script syntax and launcher unit tests
 │   └── test_disk_images.sh        # Disk Image Verification Test Suite
 └── kernel/
     ├── arch/
     │   ├── x86_64/                # Boot, serial, idt, pci, VGA/display, linker.ld
     │   ├── aarch64/               # Boot, vectors, uart, gic, pci, SimpleFb display, linker.ld
     │   └── riscv64/               # Boot, trap, uart, plic, pci, SimpleFb display, linker.ld
-    ├── include/                   # Kernel HAL & subsystem headers (display, console, framebuffer)
+    ├── include/                   # Kernel HAL & subsystem headers (display, console, storage, DMA)
     ├── init/main.cpp              # Kernel entry point
-    └── sys/                       # PMM, VMM, heap, scheduler, syscall, VFS, display_console, font, framebuffer, …
+    └── sys/                       # PMM, VMM, heap, scheduler, syscall, VFS, storage, display_console, …
 ```
 
 ---
@@ -157,17 +170,28 @@ docker run -it --rm -v $(pwd):/workspace omega-dev
 ./emulator/ovd_gui.tcl
 
 # Or launch from CLI (x86_64 includes Standard VGA):
-./emulator/ovd_run.sh run --name <device> --gpu      # SDL/Cocoa window
-./emulator/ovd_run.sh run --name <device> --no-gpu   # headless serial + Bochs VBE
+./emulator/ovd_manager.sh create --name <device> --arch x86_64 --storage virtio
+./emulator/ovd_run.sh run --name <device> --gpu --storage virtio
+./emulator/ovd_run.sh run --name <device> --no-gpu --storage virtio
+./emulator/ovd_run.sh run --name <device> --no-gpu --storage usb --dry-run
 ```
+
+OVD storage profiles are selectable at launch: `virtio`, `ahci`, `usb`,
+`sd`, `optical`, or `none`. The profile controls the QEMU transport and
+device model while the shared `userdata.img` remains the backing image.
+Use `--dry-run` to inspect the generated command without starting QEMU.
 
 ### 5. Run Automated Test Suites
 ```bash
 ./scripts/test.sh               # Multi-arch integration tests (includes test_display.sh)
 ./scripts/test_display.sh     # VGA display matrix: Bochs VBE, VgaText fallback, self-tests
 ./scripts/test_display_aarch64.sh # AArch64 display HAL and serial-fallback smoke test
+./scripts/test_storage_unit.sh # Host storage API and partition unit tests
+./scripts/test_storage.sh      # Storage tests on x86_64, AArch64, and RISC-V
+./scripts/test_scripts_unit.sh # Shell-script and dry-run launcher unit tests
 ./scripts/test_disk_images.sh   # Bootable disk image tests
-./emulator/test_ovd.sh          # OVD lifecycle + x86_64 display verification
+./emulator/test_ovd_unit.sh     # OVD configuration and storage profile unit tests
+./emulator/test_ovd.sh          # OVD lifecycle, storage profiles, and display verification
 tclsh emulator/test_ovd_gui.tcl # OVD Tcl/Tk GUI unit tests
 ```
 

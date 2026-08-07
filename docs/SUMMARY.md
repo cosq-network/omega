@@ -19,6 +19,7 @@ All planned core development phases and features for the **Omega Kernel** have b
 | **Syscall ABI Dispatcher** | `SYS_WRITE`, `SYS_YIELD`, `SYS_EXIT` | Complete |
 | **Virtual Filesystem (VFS)**| VFS Node Tree (`/` Mounted) | Complete |
 | **RAM Disk (Initrd)** | Memory File Abstraction Driver | Complete |
+| **Storage Architecture** | Pluggable block-device, transport, partition, filesystem, DMA, and hotplug plan | Planned |
 
 ---
 

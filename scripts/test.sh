@@ -90,6 +90,8 @@ run_test "x86_64" \
     "[TEST][PASS] Bochs VBE linear framebuffer pixel" \
     "[TEST][PASS] Framebuffer draw path" \
     "[TEST][PASS] Display console write path" \
+    "[TEST][PASS] Storage core memory block path" \
+    "[TEST][PASS] Storage write and flush policy" \
     "Kernel Heap Allocator initialized" \
     "Interrupt Descriptor Table (IDT) Initialized" \
     "Preemptive Multi-threading Scheduler Initialized" \
@@ -111,6 +113,8 @@ run_test "aarch64" \
     "Virtual Memory Manager (VMM) initialized" \
     "Display: No framebuffer backend found" \
     "Display console write path" \
+    "[TEST][PASS] Storage core memory block path" \
+    "[TEST][PASS] Storage write and flush policy" \
     "Kernel Heap Allocator initialized" \
     "Preemptive Multi-threading Scheduler Initialized" \
     "POSIX System Call Surface Initialized" \
@@ -130,6 +134,8 @@ run_test "riscv64" \
     "Architecture Identified: RISC-V 64-bit" \
     "Display: No framebuffer backend found" \
     "Display console write path" \
+    "[TEST][PASS] Storage core memory block path" \
+    "[TEST][PASS] Storage write and flush policy" \
     "System online. Entering idle loop"
 
 # 5. VGA Display Module dedicated test matrix (Bochs VBE + VgaText fallback)
@@ -140,6 +146,14 @@ bash "${PROJECT_ROOT}/scripts/test_display.sh"
 echo -e "\n[*] Running AArch64 display HAL test suite..."
 chmod +x "${PROJECT_ROOT}/scripts/test_display_aarch64.sh"
 bash "${PROJECT_ROOT}/scripts/test_display_aarch64.sh"
+
+echo -e "\n[*] Running storage unit and integration test suite..."
+bash "${PROJECT_ROOT}/scripts/test_storage.sh"
+
+echo -e "\n[*] Running OVD storage transport and lifecycle test suite..."
+bash "${PROJECT_ROOT}/scripts/test_scripts_unit.sh"
+bash "${PROJECT_ROOT}/emulator/test_ovd_unit.sh"
+bash "${PROJECT_ROOT}/emulator/test_ovd.sh"
 
 echo -e "\n${GREEN}=================================================${NC}"
 echo -e "${GREEN}      ALL INTEGRATION TESTS PASSED CLEANLY!       ${NC}"

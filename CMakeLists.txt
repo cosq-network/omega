@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(ARCH "Target Architecture (x86_64, aarch64, riscv64)" "x86_64")
 option(ENABLE_EXPERIMENTAL_VIRTIO_GPU "Enable the in-kernel VirtIO-GPU MMIO bring-up path" OFF)
+option(ENABLE_EXPERIMENTAL_VIRTIO_BLOCK "Enable the in-kernel VirtIO-Block MMIO bring-up path" OFF)
 message(STATUS "Configuring Omega Kernel for Architecture: ${ARCH}")
 
 find_program(LLD_PATH ld.lld PATHS /opt/homebrew/bin /usr/local/bin)
@@ -42,6 +43,11 @@ set(KERNEL_SOURCES
     kernel/sys/syscall.cpp
     kernel/sys/vfs.cpp
     kernel/sys/initrd.cpp
+    kernel/sys/dma.cpp
+    kernel/sys/storage.cpp
+    kernel/sys/memory_block.cpp
+    kernel/sys/partition.cpp
+    kernel/sys/virtio_blk.cpp
     kernel/sys/userland.cpp
     kernel/sys/elf_loader.cpp
     kernel/sys/net.cpp
@@ -96,6 +102,9 @@ add_library(kernel_objs OBJECT ${KERNEL_SOURCES})
 
 if(ENABLE_EXPERIMENTAL_VIRTIO_GPU)
     target_compile_definitions(kernel_objs PRIVATE OMEGA_ENABLE_EXPERIMENTAL_VIRTIO_GPU=1)
+endif()
+if(ENABLE_EXPERIMENTAL_VIRTIO_BLOCK)
+    target_compile_definitions(kernel_objs PRIVATE OMEGA_ENABLE_EXPERIMENTAL_VIRTIO_BLOCK=1)
 endif()
 
 add_custom_target(omega.elf ALL

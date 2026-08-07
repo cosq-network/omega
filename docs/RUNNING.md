@@ -33,6 +33,7 @@ qemu-system-x86_64 \
 ```bash
 ./scripts/test_display.sh    # Bochs VBE, -device VGA, -vga none fallback
 ./scripts/test.sh            # Full multi-arch suite (includes display tests)
+./scripts/test_storage.sh    # Storage unit tests and all-ISA QEMU storage-core tests
 ```
 
 ---
@@ -102,6 +103,50 @@ qemu-system-riscv64 -M virt -cpu rv64 -bios default -nographic \
 ./emulator/ovd_run.sh run --name tablet --no-gpu
 ```
 
+OVD storage profiles select the QEMU transport for `userdata.img`:
+
+```bash
+./emulator/ovd_run.sh run --name phone --storage virtio --dry-run
+./emulator/ovd_run.sh run --name phone --storage ahci
+./emulator/ovd_run.sh run --name phone --storage usb
+./emulator/ovd_run.sh run --name phone --storage sd
+./emulator/ovd_run.sh run --name phone --storage optical
+./emulator/ovd_run.sh run --name phone --storage none
+```
+
+New OVDs default to `virtio`: x86_64 uses `virtio-blk-pci`, while AArch64 and
+RISC-V use `virtio-blk-device`. `--dry-run` prints the generated QEMU command
+without launching it. This emulator wiring is independent of the kernel
+VirtIO-Block driver, which remains opt-in during validation.
+
+## Storage Architecture
+
+Storage support is being implemented according to
+[`docs/STORAGE_ARCHITECTURE_PLAN.md`](STORAGE_ARCHITECTURE_PLAN.md). The first
+QEMU storage target is VirtIO-Block, followed by NVMe and AHCI/SATA. SD/microSD,
+USB Mass Storage, and optical media are separate protocol drivers above the
+same block-device and filesystem layers.
+
+Planned QEMU examples after the corresponding drivers land:
+
+```bash
+# VirtIO-Block reference path
+qemu-system-x86_64 \
+  -kernel build/x86_64/omega.elf \
+  -drive file=disk_images/omega-x86_64-bootable.img,format=raw,if=virtio \
+  -serial stdio -display none
+
+# NVMe path
+qemu-system-x86_64 \
+  -kernel build/x86_64/omega.elf \
+  -drive file=disk_images/omega-x86_64-bootable.img,format=raw,if=none,id=nvm \
+  -device nvme,drive=nvm,serial=omega-nvme \
+  -serial stdio -display none
+```
+
+These commands describe planned interfaces and are not advertised as passing
+storage-driver tests until the corresponding milestones are complete.
+
 ---
 
 ## Related Documentation
@@ -110,4 +155,5 @@ qemu-system-riscv64 -M virt -cpu rv64 -bios default -nographic \
 | :--- | :--- |
 | `docs/VGA_DISPLAY_PLAN.md` | x86_64 Standard VGA (Phase 7.2 — implemented) |
 | `docs/DISPLAY_AARCH64_RISCV_PLAN.md` | AArch64 & RISC-V display extension (Phase 7.2b — planned) |
+| `docs/STORAGE_ARCHITECTURE_PLAN.md` | Cross-architecture storage architecture and driver roadmap |
 | `docs/ROADMAP.md` | Full milestone matrix |

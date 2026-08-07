@@ -15,7 +15,7 @@ OVD_DIR="${PROJECT_ROOT}/emulator/ovd"
 mkdir -p "${OVD_DIR}"
 
 usage() {
-    echo "Usage: $0 create --name <ovd_name> --arch <x86_64|aarch64|riscv64> [--ram <MB>] [--disk <MB>]"
+    echo "Usage: $0 create --name <ovd_name> --arch <x86_64|aarch64|riscv64> [--ram <MB>] [--disk <MB>] [--storage <virtio|ahci|usb|sd|optical|none>]"
     echo "       $0 list"
     echo "       $0 delete --name <ovd_name>"
     exit 1
@@ -34,6 +34,7 @@ case "${COMMAND}" in
         ARCH="x86_64"
         RAM="1024"
         DISK="64"
+        STORAGE="virtio"
 
         while [[ $# -gt 0 ]]; do
             case $1 in
@@ -41,6 +42,7 @@ case "${COMMAND}" in
                 --arch) ARCH="$2"; shift 2 ;;
                 --ram)  RAM="$2";  shift 2 ;;
                 --disk) DISK="$2"; shift 2 ;;
+                --storage) STORAGE="$2"; shift 2 ;;
                 *) usage ;;
             esac
         done
@@ -49,6 +51,11 @@ case "${COMMAND}" in
             echo -e "${RED}[ERROR] OVD Name is required.${NC}"
             usage
         fi
+
+        case "${STORAGE}" in
+            virtio|ahci|usb|sd|optical|none) ;;
+            *) echo -e "${RED}[ERROR] Unsupported storage profile '${STORAGE}'.${NC}"; usage ;;
+        esac
 
         OVD_PATH="${OVD_DIR}/${NAME}"
         if [ -d "${OVD_PATH}" ]; then
@@ -65,6 +72,9 @@ ovd.name=${NAME}
 ovd.arch=${ARCH}
 ovd.ram=${RAM}
 ovd.disk=${DISK}
+ovd.storage=${STORAGE}
+ovd.storage.image=userdata.img
+ovd.storage.readonly=false
 ovd.vga=$([ "${ARCH}" = "x86_64" ] && echo "std" || echo "simplefb")
 EOF
 

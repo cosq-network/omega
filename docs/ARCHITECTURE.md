@@ -109,6 +109,21 @@ namespace hal {
 
 ## 5. C++ Freestanding Constraints & Runtime Rules
 
+## 5A. Storage Architecture Boundary
+
+Storage support is protocol-oriented and is specified in
+[`STORAGE_ARCHITECTURE_PLAN.md`](STORAGE_ARCHITECTURE_PLAN.md). Architecture
+code supplies bus discovery, MMIO, interrupts, DMA mapping, cache
+synchronization, and reset hooks. Shared storage code supplies request
+validation, device identity, queueing, protocol commands, partitions, and
+filesystem clients.
+
+The first implementation keeps drivers in the kernel because Omega IPC and
+process isolation are not complete. The common storage device and request
+interfaces must remain suitable for a later userspace `storaged` server. No
+filesystem code may depend directly on PCI, USB, SDHCI, AHCI, NVMe, or VirtIO
+registers.
+
 To compile C++ without an underlying OS host, the following flags and rules are enforced:
 
 ### Compiler Flags (Clang)

@@ -51,6 +51,33 @@ run_ovd_test() {
         exit 1
     fi
 
+    if grep -q '^ovd.storage=virtio$' "${PROJECT_ROOT}/emulator/ovd/${name}/config.ini"; then
+        echo -e "  [PASS] OVD '${name}' declares the VirtIO storage profile."
+    else
+        echo -e "  [${RED}FAIL${NC}] OVD '${name}' has no VirtIO storage profile."
+        exit 1
+    fi
+
+    local dry_run_file="${PROJECT_ROOT}/emulator/${name}_dry_run.log"
+    bash "${OVD_RUN}" run --name "${name}" --no-gpu --dry-run > "${dry_run_file}" 2>&1
+    assert_log_contains "${dry_run_file}" "virtio-blk"
+
+    if [ "${arch}" = "x86_64" ]; then
+        bash "${OVD_RUN}" run --name "${name}" --no-gpu --storage ahci --dry-run > "${dry_run_file}" 2>&1
+        assert_log_contains "${dry_run_file}" "if=ide"
+        bash "${OVD_RUN}" run --name "${name}" --no-gpu --storage usb --dry-run > "${dry_run_file}" 2>&1
+        assert_log_contains "${dry_run_file}" "usb-storage"
+        bash "${OVD_RUN}" run --name "${name}" --no-gpu --storage optical --dry-run > "${dry_run_file}" 2>&1
+        assert_log_contains "${dry_run_file}" "ide-cd"
+        bash "${OVD_RUN}" run --name "${name}" --no-gpu --storage none --dry-run > "${dry_run_file}" 2>&1
+        if grep -Fq "userdata.img" "${dry_run_file}"; then
+            echo -e "  [${RED}FAIL${NC}] OVD '${name}' none profile still attaches storage."
+            exit 1
+        fi
+        echo "  [PASS] OVD storage profile matrix verified."
+    fi
+    rm -f "${dry_run_file}"
+
     # 3. Test headless OVD execution. ARM/RISC-V exercise the SimpleFb/serial
     # fallback path; x86_64 exercises Standard VGA/Bochs VBE.
     echo "[*] Testing Headless OVD Execution..."

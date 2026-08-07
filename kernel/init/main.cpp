@@ -16,6 +16,8 @@
 #include "kernel/console.hpp"
 #include "kernel/framebuffer.hpp"
 #include "kernel/fdt.hpp"
+#include "kernel/storage.hpp"
+#include "kernel/virtio_blk.hpp"
 
 // Static Heap Allocation Buffer (1 MB) to guarantee physical memory availability across architectures
 static uint8_t kernel_heap_buffer[1024 * 1024] __attribute__((aligned(8)));
@@ -111,6 +113,17 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
 
     // Initialize Heap Allocator using static kernel heap buffer
     memory::HeapAllocator::init(reinterpret_cast<uintptr_t>(kernel_heap_buffer), sizeof(kernel_heap_buffer));
+
+    // Initialize the common storage layer before hardware drivers and VFS
+    // mounts. The memory-backed device validates the request/lifecycle API.
+    storage::Manager::init();
+    if (storage::memory_block::init() == storage::Status::Success && storage::Manager::self_test()) {
+        kernel::kprintf("[TEST][PASS] Storage core memory block path\n");
+        kernel::kprintf("[TEST][PASS] Storage write and flush policy\n");
+    } else {
+        kernel::kprintf("[TEST][FAIL] Storage core memory block path\n");
+    }
+    virtio_blk::init();
 
     // Initialize Hardware Interrupt System
     hal::interrupts_init();

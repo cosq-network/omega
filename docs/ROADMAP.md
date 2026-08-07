@@ -30,7 +30,7 @@ Phases **1–6** cover the research-kernel foundation (completed). Phases **7–
 | **Phase 5.5: VirtIO Network Stack** | `COMPLETED` | VirtIO-Net packet driver & TCP/IP stack | L2 Ethernet, L3 IPv4, L4 UDP/TCP headers | Frame RX Reader |
 | **Phase 6A: Bootable Disk Generator** | `COMPLETED` | UEFI/GPT multi-format disk generator | RAW, QCOW2, VMDK, VDI with FAT32 payloads | `create_bootable_disk.sh` |
 | **Phase 6B: Firmware Compatibility** | `COMPLETED` | U-Boot (`bootefi`/`booti`) & Coreboot (EDK2/GRUB) | Embedded `/EFI/BOOT/` & `/boot/omega.elf` | `docs/FIRMWARE_BOOT.md` |
-| **Phase 6C: OVD Emulator & GUI** | `COMPLETED` | Omega Virtual Device Manager & Tcl/Tk GUI; x86_64 Standard VGA via `ovd_run.sh` | CLI manager, `--gpu` / `--no-gpu` launcher, Tcl/Tk GUI | `ovd_gui.tcl`, `test_ovd.sh` |
+| **Phase 6C: OVD Emulator & GUI** | `COMPLETED` | Omega Virtual Device Manager & Tcl/Tk GUI; multi-architecture display and storage transport wiring | CLI manager, `--gpu` / `--no-gpu`, `--storage` profiles, `--dry-run`, Tcl/Tk GUI | `test_ovd_unit.sh`, `test_ovd.sh`, `test_ovd_gui.tcl` |
 | **Phase 6D: Containerization & CI/CD** | `COMPLETED` | Alpine Dockerfile, DevContainers, GitHub Actions | DevContainers, Codespaces, GitHub Actions CI/CD incl. `test_display.sh` | `.github/workflows/ci.yml` |
 
 ---
@@ -71,7 +71,7 @@ Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsys
 
 | Milestone | Status | Description | Key Deliverables | Verification |
 | :--- | :---: | :--- | :--- | :---: |
-| **Phase 7.1: VirtIO Block Storage** | `PLANNED` | VirtIO-Block PCI/MMIO driver for block read/write I/O | Block device abstraction, read/write path, queue handling | Mount test partition in QEMU |
+| **Phase 7.1: Storage Core & VirtIO-Block** | `IN PROGRESS` | Common storage API, device graph, DMA foundation, and guarded VirtIO-Block reference driver | Request validation, lifecycle binding, MMIO VirtIO, partition metadata, controlled writes, protocol-driver expansion | Host unit tests, QEMU storage tests, and cross-architecture builds |
 | **Phase 7.2: System Display Module (Standard VGA)** | `COMPLETED` | x86_64 VGA text mode, Bochs VBE linear FB, dual serial+display console | `hal::Display`, Bochs DISPI 1024×768×32, 8×16 font, Multiboot2 FB tag, `kprintf` mirroring | `scripts/test_display.sh`, CI, OVD `--gpu` |
 | **Phase 7.2b: AArch64 & RISC-V Display** | `IN PROGRESS` | SimpleFb (DT), shared FDT parser, portable framebuffer console, and guarded VirtIO-GPU MMIO foundation | FDT walker, DT pointer handoff, `SimpleFb` HALs, identity-map VMM bring-up, VirtIO-GPU protocol/queue scaffold, serial fallback | `scripts/test_display_aarch64.sh`, QEMU AArch64/RISC-V smoke tests |
 | **Phase 7.3: SMP Multi-Core** | `PLANNED` | Symmetric multiprocessing across all cores | APIC ICR (x86), PSCI (AArch64), OpenSBI IPI (RISC-V); per-CPU run queues | Multi-core boot log, parallel thread execution |
@@ -80,6 +80,45 @@ Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsys
 | **Phase 7.6: IPC Foundation** | `PLANNED` | Inter-process communication for microkernel services | Message passing, capability tokens, shared-memory grants | Driver server ↔ client round-trip |
 
 **Exit criteria:** Omega boots in QEMU with block storage, **graphical console on x86_64 (done)**, SMP, preemptive scheduling, process isolation, and a userspace driver server communicating over IPC.
+
+### Storage Architecture
+
+The storage roadmap is defined in [`docs/STORAGE_ARCHITECTURE_PLAN.md`](STORAGE_ARCHITECTURE_PLAN.md). Storage is organized by transport and protocol rather than by physical media label: NVMe covers PCIe SSDs, AHCI/ATA covers SATA SSDs and HDDs, SDHCI covers both SD and microSD, and USB Mass Storage covers USB flash and USB optical devices. The current implementation is a kernel-resident foundation with a writable synthetic backend and guarded VirtIO-Block path; future hardware drivers and the userspace `storaged` migration boundary remain planned.
+
+| Storage milestone | Status | Scope |
+| :--- | :---: | :--- |
+| **7.1a Storage core and DMA** | `PARTIAL` | Common request/status API, device registry and lifecycle states, validation, DMA mapping foundation, and synthetic backend validated on all ISAs; asynchronous completion, cancellation, and production bounce-buffer paths remain |
+| **7.1b Partitions and read-only filesystems** | `PARTIAL` | GPT/MBR metadata parser added; FAT32, ext4, ISO9660, and UDF mounting remain |
+| **7.1c VirtIO-Block** | `EXPERIMENTAL` | VirtIO MMIO discovery, feature negotiation, queue setup, capacity, read/write/flush request encoding, and opt-in AArch64/RISC-V cross-builds; runtime queue completion validation remains |
+| **7.1d NVMe** | `PLANNED` | NVMe controller, namespaces, PRP reads, reset recovery |
+| **7.1e AHCI/SATA/ATAPI** | `PLANNED` | SATA SSD/HDD reads and CD/DVD packet reads |
+| **7.1f SDHCI and USB Mass Storage** | `PLANNED` | SD/microSD, xHCI, BOT/UAS, USB flash and optical media |
+| **7.1g Controlled writes** | `PARTIAL` | Common writable/read-only policy, FUA/barrier flags, flush dispatch, and synthetic write tests; filesystem/hardware writes remain |
+| **7.1h Storage emulator and test harness** | `COMPLETED` | QEMU storage profiles in OVD and x86 launcher; script/OVD unit tests, dry-run command inspection, and all-ISA storage integration tests |
+
+### Current Phase 7.1 implementation boundary
+
+Implemented and verified:
+
+- Shared storage types, device registration, lifecycle state transitions,
+  request validation, read/write/flush dispatch, and read-only protection.
+- DMA allocation/mapping foundation and a synthetic writable memory block used
+  for deterministic tests.
+- GPT/MBR metadata parsing with host-side unit coverage.
+- Guarded VirtIO-Block MMIO discovery and request encoding, including writes
+  and flushes; default builds do not activate it until legacy-MMIO queue
+  completion is validated.
+- QEMU/OVD storage transport wiring and dry-run inspection for the supported
+  emulator profiles.
+- Unit and integration coverage across x86_64, AArch64, and RISC-V.
+
+Not yet implemented:
+
+- NVMe, AHCI/SATA, ATAPI, SDHCI, xHCI/USB MSC, and physical-device hotplug
+  drivers.
+- FAT32, ext4, ISO9660, and UDF mounting or filesystem writeback.
+- Production hardware recovery, power-loss testing, multiqueue performance,
+  and userspace `storaged` migration over IPC.
 
 ### Phase 7.2 Delivered (x86_64 Standard VGA)
 
@@ -357,14 +396,14 @@ Year 4–5      Phase 10C + 11       Phone product, public release, OEM partners
 
 Concrete sequence mapped to the existing codebase:
 
-1. **Complete Phase 7** — VirtIO block, **Phase 7.2b display on AArch64/RISC-V** (see `docs/DISPLAY_AARCH64_RISCV_PLAN.md`), SMP, timer preemption, per-process VM, IPC. *(Standard VGA on x86_64 is done — Phase 7.2.)*
+1. **Complete Phase 7** — validate VirtIO-Block completion, add NVMe/AHCI/SDHCI/USB storage drivers, complete **Phase 7.2b display on AArch64/RISC-V** (see `docs/DISPLAY_AARCH64_RISCV_PLAN.md`), SMP, timer preemption, per-process VM, and IPC. *(Standard VGA on x86_64 is done — Phase 7.2.)*
 2. **Select first real board** — QEMU `virt` → Raspberry Pi 4/5 → one x86_64 laptop.
 3. **Userspace init process** — Minimal init that spawns a shell over serial (validates ELF loader + syscalls end-to-end).
 4. **IPC + driver framework** — Storage, network, and display as privileged userspace servers.
 5. **Port musl (or minimal libc)** — Expand syscalls to POSIX subset required by libc.
 6. **Extend graphical console** — Scrollback, ANSI colors, userspace compositor path (kernel FB console is in place).
 7. **Freeze v1 ABI** — Document and version the syscall and IPC interfaces (`docs/ABI.md`).
-8. **Extend OVD emulator** — x86_64 Standard VGA is wired; **Phase 7.2b:** VirtIO-GPU + SimpleFb for AArch64/RISC-V OVD targets.
+8. **Extend OVD emulator** — x86_64 Standard VGA and cross-architecture storage profiles are wired; next add validated VirtIO-Block runtime completion, VirtIO-GPU + SimpleFb for AArch64/RISC-V, and device hotplug scenarios.
 9. **Defer phone work** — Until laptop/tablet daily-driver quality is demonstrated.
 
 ---
@@ -398,5 +437,8 @@ Omega's multi-arch HAL, freestanding C++20 runtime, formal syscall ABI, and OVD 
 | `docs/RUNNING.md` | Build and QEMU execution guide |
 | `docs/VGA_DISPLAY_PLAN.md` | System Display Module — x86_64 Standard VGA (Phase 7.2) |
 | `docs/DISPLAY_AARCH64_RISCV_PLAN.md` | System Display Module — AArch64 & RISC-V extension (Phase 7.2b) |
+| `docs/STORAGE_ARCHITECTURE_PLAN.md` | Cross-architecture storage architecture and implementation plan |
+| `scripts/README.md` | Script catalog, launcher options, image generation, and test guide |
+| `emulator/README.md` | OVD configuration, storage profiles, launch modes, and test guide |
 | `docs/RISCV64_PLAN.md` | RISC-V 64 architectural plan |
 | `docs/COMPLETION_REPORT.md` | Phase 1–6 verification report |
