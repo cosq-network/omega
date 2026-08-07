@@ -242,6 +242,26 @@ service across x86_64, AArch64, and RISC-V.
 | **P5 Touchscreen** | `PLANNED` | I²C/SPI controllers, GPIO IRQ, reset, and panel transforms |
 | **P6 IPC/inputd** | `PLANNED` | Userspace event service, permissions, profiles, and consumers |
 
+### Real Hardware Validation Matrix
+
+The hardware-validation strategy is documented in
+[`docs/REAL_HARDWARE_VALIDATION_MATRIX.md`](REAL_HARDWARE_VALIDATION_MATRIX.md).
+It prioritizes ODROID-H4/Intel NUC8 for x86_64, Raspberry Pi 5/Orange Pi 5
+for AArch64, and VisionFive 2/BPI-F3 for RISC-V, then expands to PinePhone Pro,
+PineTab2, unlockable Fairphone devices, Framework laptops, and refurbished
+business desktops. The matrix defines bring-up, recovery, display, storage,
+communications, pointing-device, power, and support-classification gates.
+
+| Hardware milestone | Status | Scope |
+| --- | --- | --- |
+| **H0 QEMU** | `COMPLETED` | Cross-architecture deterministic regression baseline |
+| **H1 x86_64** | `PLANNED` | UEFI/GOP, serial, PCI, NVMe, USB, Ethernet, and display |
+| **H2 AArch64** | `PLANNED` | FDT, UART, SD, USB, Ethernet, and framebuffer |
+| **H3 RISC-V** | `PLANNED` | OpenSBI, FDT, PLIC, UART, storage, Ethernet, and HDMI |
+| **H4 High-speed boards** | `PLANNED` | Orange Pi 5/BPI-F3 PCIe, Wi-Fi, USB, Type-C, and 1080p display |
+| **H5 Mobile/tablet** | `PLANNED` | PineTab2/PinePhone Pro touch, battery, suspend, and mobile display |
+| **H6 Laptop/desktop** | `PLANNED` | Framework/EliteDesk ACPI, touchpad, power, hotplug, and multi-display |
+
 ## 🖥️ Phase 9: Real Hardware Support
 
 QEMU VirtIO drivers do not transfer to production devices. Phase 9 introduces platform abstraction and real hardware drivers, **one reference board at a time**.
