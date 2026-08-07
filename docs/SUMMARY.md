@@ -23,6 +23,7 @@ All planned core development phases and features for the **Omega Kernel** have b
 | **Communications Architecture** | Generic serial, Ethernet, USB 2/3, USB Type-C, and 2.4/5 GHz Wi-Fi integration plan | Planned |
 | **Pointing Devices Architecture** | Generic mouse, touchpad, touchscreen, HID, PS/2, I²C/SPI, calibration, gestures, and input-service plan | Planned |
 | **Real Hardware Validation Matrix** | Low-cost x86_64, AArch64, and RISC-V boards plus mobile, tablet, laptop, and desktop validation strategy | Planned |
+| **OVD Real-Device Profile Registry** | Versioned QEMU, Android AVD, VMApple, and physical-device approximation profile governance | Planned |
 
 ---
 

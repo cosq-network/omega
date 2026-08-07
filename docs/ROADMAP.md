@@ -262,6 +262,32 @@ communications, pointing-device, power, and support-classification gates.
 | **H5 Mobile/tablet** | `PLANNED` | PineTab2/PinePhone Pro touch, battery, suspend, and mobile display |
 | **H6 Laptop/desktop** | `PLANNED` | Framework/EliteDesk ACPI, touchpad, power, hotplug, and multi-display |
 
+### OVD Real-Device Profile Registry
+
+The profile-catalog strategy is documented in
+[`docs/OVD_REAL_DEVICE_PROFILE_PLAN.md`](OVD_REAL_DEVICE_PROFILE_PLAN.md).
+It establishes a versioned declarative registry for direct QEMU `q35`, `pc`,
+AArch64 `virt`, and RISC-V `virt` profiles, plus explicitly conditional
+VMApple and Android Emulator/AVD adapters. It also defines generated CSV/JSON/
+Markdown reports, profile-to-hardware mappings, schema validation, deterministic
+command rendering, external dependency checks, CI lanes, ownership, and
+deprecation policy. Native profiles must resolve the latest compatible
+`omega.elf` and matching disk-image manifest; missing or stale artifacts are
+built before launch. The planned default Omega system filesystem is ext4,
+with FAT32 retained only for an explicit boot/ESP compatibility partition or
+legacy boot-image mode.
+
+| OVD profile milestone | Status | Scope |
+| --- | --- | --- |
+| **R0 Registry foundation** | `PLANNED` | Schema, catalog, IDs, status, ownership, and validation |
+| **R1 Native QEMU profiles** | `PLANNED` | x86_64 `q35`/`pc`, AArch64 `virt`, and RISC-V `virt` |
+| **R2 Generated reports** | `PLANNED` | Deterministic CSV, JSON, Markdown, and lock artifacts |
+| **R3 OVD integration** | `PLANNED` | Profile list/show/validate/create-from-profile and GUI support |
+| **R4 Android adapter** | `PLANNED` | AVD discovery, launch, GPU, ADB, snapshots, and cleanup |
+| **R5 VMApple adapter** | `PLANNED` | Apple-Silicon/macOS prerequisite and conditional launch workflow |
+| **R6 Physical mappings** | `PLANNED` | Hardware records linked to virtual approximations |
+| **R7 Maintenance automation** | `PLANNED` | QEMU compatibility scans, ownership, deprecation, and release reports |
+
 ## 🖥️ Phase 9: Real Hardware Support
 
 QEMU VirtIO drivers do not transfer to production devices. Phase 9 introduces platform abstraction and real hardware drivers, **one reference board at a time**.
