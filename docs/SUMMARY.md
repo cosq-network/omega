@@ -20,6 +20,8 @@ All planned core development phases and features for the **Omega Kernel** have b
 | **Virtual Filesystem (VFS)**| VFS Node Tree (`/` Mounted) | Complete |
 | **RAM Disk (Initrd)** | Memory File Abstraction Driver | Complete |
 | **Storage Architecture** | Pluggable block-device, transport, partition, filesystem, DMA, and hotplug plan | Planned |
+| **Communications Architecture** | Generic serial, Ethernet, USB 2/3, USB Type-C, and 2.4/5 GHz Wi-Fi integration plan | Planned |
+| **Pointing Devices Architecture** | Generic mouse, touchpad, touchscreen, HID, PS/2, I²C/SPI, calibration, gestures, and input-service plan | Planned |
 
 ---
 

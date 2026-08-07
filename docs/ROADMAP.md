@@ -202,6 +202,46 @@ Required before running on untrusted workloads or real user hardware.
 
 ---
 
+### Communications Architecture Plan
+
+The communications integration strategy is documented in
+[`docs/COMMUNICATIONS_INTEGRATION_PLAN.md`](COMMUNICATIONS_INTEGRATION_PLAN.md).
+It defines the generic device graph, event/completion and DMA contracts, and
+the phased path for native serial, VirtIO/e1000 Ethernet, xHCI USB 2/3,
+USB Type-C/PD, and synthetic then hardware-backed 2.4/5 GHz Wi-Fi. The plan
+also aligns USB serial/network/storage classes with the existing abstractions
+and reserves userspace `seriald`, `usbhostd`, `netd`, `wifid`, and `typed`
+services for the IPC migration milestone.
+
+| Communications milestone | Status | Scope |
+| --- | --- | --- |
+| **C0 Foundation** | `PLANNED` | Device graph, capabilities, events, completion, and DMA contract |
+| **C1 Serial** | `PLANNED` | Native UART lifecycle and USB CDC ACM convergence |
+| **C2 Ethernet** | `PLANNED` | Generic `netdev`, VirtIO-net, e1000, PHY/link management |
+| **C3 USB core** | `PLANNED` | xHCI USB 2/3, enumeration, URBs, hubs, hotplug |
+| **C4 Type-C and USB classes** | `PLANNED` | CDC, HID, mass storage, Type-C roles, TCPC/PD foundation |
+| **C5 Wi-Fi** | `PLANNED` | Synthetic radio, 2.4/5 GHz capabilities, regulatory/security boundary |
+| **C6 IPC migration** | `PLANNED` | `seriald`, `usbhostd`, `netd`, `wifid`, `typed`, and `devd` |
+
+### Pointing Devices Architecture Plan
+
+The pointing-device strategy is documented in
+[`docs/POINTING_DEVICES_INTEGRATION_PLAN.md`](POINTING_DEVICES_INTEGRATION_PLAN.md).
+It defines the common event/device model and staged support for USB/PS2
+mice, USB and I²C-HID touchpads, embedded I²C/SPI touchscreens, multi-touch,
+calibration, gestures, OVD input profiles, and the future userspace `inputd`
+service across x86_64, AArch64, and RISC-V.
+
+| Pointing-device milestone | Status | Scope |
+| --- | --- | --- |
+| **P0 Input foundation** | `PLANNED` | Device graph, event envelope, queues, lifecycle, and capabilities |
+| **P1 HID core** | `PLANNED` | Descriptor parser, report decoder, and USB HID binding |
+| **P2 Mouse** | `PLANNED` | USB/PS2 mouse, buttons, wheel, recovery, and hotplug |
+| **P3 Touch core** | `PLANNED` | Contact frames, slots, normalization, and calibration |
+| **P4 Touchpad** | `PLANNED` | USB HID/I²C-HID touchpads, gestures, and palm policy |
+| **P5 Touchscreen** | `PLANNED` | I²C/SPI controllers, GPIO IRQ, reset, and panel transforms |
+| **P6 IPC/inputd** | `PLANNED` | Userspace event service, permissions, profiles, and consumers |
+
 ## 🖥️ Phase 9: Real Hardware Support
 
 QEMU VirtIO drivers do not transfer to production devices. Phase 9 introduces platform abstraction and real hardware drivers, **one reference board at a time**.
