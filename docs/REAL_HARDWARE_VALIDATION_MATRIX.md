@@ -53,6 +53,75 @@ Buy the backup only after the first board reaches serial boot. This avoids
 spending on three boards before the boot contract and instrumentation are
 stable.
 
+## 3A. India purchase links and indicative price bands
+
+The following price bands are indicative India-market ranges checked on
+2026-08-07. They are not quotes or guarantees. Prices vary significantly with
+RAM size, storage, cooling, power supply, import duty, GST, shipping, stock,
+and whether the seller is an authorized distributor. Confirm the final
+checkout price, warranty, board revision, and included accessories before
+ordering.
+
+“Board only” excludes power, cooling, storage, case, cables, and display
+accessories. “Landed” means a realistic imported or bundled purchase estimate
+including common accessories, but not necessarily customs charges.
+
+| Target | India purchase link | Indicative price range | Availability note |
+| --- | --- | ---: | --- |
+| ODROID-H4 | [ElectroPi India](https://www.electropi.in/odroid-h4-single-board-computer) | ₹20,000–₹35,000 board only; ₹28,000–₹45,000 equipped | Indian stock/importer availability varies; verify whether the listing is H4, H4+, or H4 Ultra |
+| Intel NUC8i5BEK/BEH | [Amazon India search](https://www.amazon.in/s?k=Intel+NUC8i5BEK) or [used-market search](https://www.google.com/search?q=Intel+NUC8i5BEK+India+used) | ₹15,000–₹35,000 used, depending on RAM/SSD | Usually second-hand; inspect BIOS password, power adapter, SSD health, and display ports |
+| HP EliteDesk 800 G3 Mini/SFF | [HP/Amazon India search](https://www.amazon.in/s?k=HP+EliteDesk+800+G3+Mini) | ₹8,000–₹22,000 used | Confirm exact CPU, RAM, storage, DisplayPort/serial options, and Windows/BIOS lock state |
+| Raspberry Pi 5 4 GB | [Robu India](https://robu.in/product/raspberry-pi-5-model-4gb/) | ₹8,000–₹16,000 board only; ₹12,000–₹22,000 equipped | Authorized-channel stock can change quickly; the official cooler and 27 W USB-C supply are recommended |
+| Raspberry Pi 5 8 GB | [Robocraze India](https://robocraze.com/products/raspberry-pi-5-8gb) or [Robu India](https://robu.in/product/raspberry-pi-5-model-8gb/) | ₹12,000–₹25,000 board only; ₹17,000–₹32,000 equipped | Compare authorized sellers; avoid listings that omit warranty or use unclear RAM variants |
+| Orange Pi 5 8 GB | [Amazon India search](https://www.amazon.in/s?k=Orange+Pi+5+8GB) or [official product documentation](https://orangepi.net/wp-content/uploads/2023/05/OrangePi_5_RK3588S_User-Manual_v1.5.pdf) | ₹14,000–₹28,000 landed; ₹20,000–₹38,000 with NVMe/power/cooling | Often imported; check RK3588S model, RAM, eMMC option, power supply, and customs |
+| BeaglePlay | [BeagleBoard India/global purchase page](https://www.beagleboard.org/boards/beagleplay) | ₹12,000–₹25,000 landed | Availability is distributor-dependent; confirm AM625 revision and included wireless/headers |
+| StarFive VisionFive 2 8 GB | [Waveshare purchase page](https://www.waveshare.com/visionfive2.htm) | ₹18,000–₹35,000 landed; ₹25,000–₹45,000 with eMMC/PSU/cables | Usually imported; verify 8 GB revision, boot flash, power adapter, and India delivery |
+| Banana Pi BPI-F3 8 GB | [Official BPI-F3 page/shop link](https://docs.banana-pi.org/en/BPI-F3/BananaPi_BPI-F3) | ₹18,000–₹35,000 landed; ₹25,000–₹45,000 equipped | Newer RISC-V platform; verify RAM/eMMC/Wi-Fi option and firmware support before purchase |
+| Milk-V Mars | [Milk-V Mars documentation/store links](https://milkv.io/docs/mars/overview) | ₹10,000–₹22,000 landed | Stock is less predictable; buy only when board revision and shipping are confirmed |
+| PinePhone Pro | [PINE64 product/store page](https://pine64.org/devices/pinephone_pro/) | ₹35,000–₹65,000 landed | Import-dependent; add battery, shipping, duty, and possible keyboard/accessory costs |
+| PineTab2 4/8 GB | [PINE64 product/store page](https://pine64.org/devices/pinetab2/) | ₹25,000–₹50,000 landed | Import-dependent; keyboard is commonly part of the tablet package, but verify the listing |
+| Fairphone 5 | [Fairphone purchase page](https://www.fairphone.com/) | ₹45,000–₹75,000 if imported | Region, modem bands, warranty, and bootloader-unlock eligibility must be checked |
+| Framework Laptop 13 | [Framework Laptop 13](https://frame.work/laptop13?tab=linux) | ₹90,000–₹1,80,000 landed/configured | India availability and warranty can differ from the official order region; import before buying |
+| Refurbished business laptop | [Amazon India search](https://www.amazon.in/s?k=refurbished+ThinkPad+T480) | ₹18,000–₹45,000 | Prefer models with UEFI, replaceable NVMe/SATA, HDMI/DP, and a documented Linux profile |
+| Refurbished desktop | [Amazon India search](https://www.amazon.in/s?k=refurbished+Dell+OptiPlex+desktop) | ₹10,000–₹35,000 | Confirm PSU, PCIe slots, DisplayPort/HDMI, BIOS password status, and included power cable |
+
+For the three initial targets, a realistic India budget is approximately:
+
+```text
+ODROID-H4 / NUC8 + accessories:        ₹25,000–₹45,000
+Raspberry Pi 5 4 GB + accessories:     ₹12,000–₹22,000
+VisionFive 2 8 GB + accessories:       ₹25,000–₹45,000
+```
+
+This excludes a monitor, test host, Ethernet switch, USB-UART adapters, and
+instrumentation. A complete first lab should budget approximately ₹70,000–₹1,35,000,
+depending mainly on whether the x86 and RISC-V systems are bought used or
+imported.
+
+### 3A.1 Safer Indian purchasing order
+
+1. Buy Raspberry Pi 5 from an authorized Indian distributor first.
+2. Buy a refurbished Intel NUC/EliteDesk locally, or ODROID-H4 if new-board
+   availability is confirmed.
+3. Buy VisionFive 2 from a seller that provides India shipping and a clear
+   return policy.
+4. Add Orange Pi 5 or BPI-F3 only after the first three platforms are capable
+   of serial recovery.
+5. Treat Pine64, Milk-V, Framework, and Fairphone products as import or
+   region-dependent purchases and verify warranty/bootloader conditions first.
+
+### 3A.2 Price-verification checklist
+
+Before paying, record:
+
+- seller name, product URL, and date/time;
+- exact board/model/revision and RAM size;
+- whether power supply, cooler, case, storage, and antenna are included;
+- GST, shipping, customs, and import charges;
+- warranty and return terms in India;
+- bootloader-lock and recovery implications;
+- expected delivery time and replacement availability.
+
 ## 4. x86_64 hardware recommendations
 
 ### 4.1 ODROID-H4/H4+
