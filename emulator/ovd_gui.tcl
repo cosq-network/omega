@@ -1,262 +1,314 @@
 #!/usr/bin/env wish
 
-# Omega Virtual Device (OVD) Manager GUI Application
-# Built using Tcl/Tk with dark aesthetic theme and TTK widgets
+# Omega Virtual Device Manager GUI.
+#
+# The GUI is a thin, safe front end to ovd_manager.sh.  The profile catalog
+# remains authoritative; Tcl/Tk only selects profiles and presents results.
 
+package require Tk
 package require Ttk
 
-# Configure Window Properties
-wm title . "Omega Virtual Device (OVD) Manager"
-wm geometry . 820x560
-wm resizable . 1 1
+set SCRIPT_DIR [file dirname [file normalize [info script]]]
+set MANAGER [file join $SCRIPT_DIR ovd_manager.sh]
+set PROFILE_TOOL [file join $SCRIPT_DIR profile_catalog.py]
+array set PROFILE_META {}
 
-# Configure Custom Styling System
-ttk::style theme use clam
-
-# Custom Dark Theme Colors
-set bg_dark      "#1E1E2E"
-set bg_card      "#2A2A3C"
-set fg_light     "#CDD6F4"
-set accent_blue  "#89B4FA"
+set bg_dark "#1E1E2E"
+set bg_card "#2A2A3C"
+set fg_light "#CDD6F4"
+set accent_blue "#89B4FA"
 set accent_green "#A6E3A1"
-set accent_red   "#F38BA8"
+set accent_red "#F38BA8"
 
+wm title . "Omega Virtual Device Manager"
+wm geometry . 1160x700
+wm minsize . 980 600
 . configure -background $bg_dark
-
+ttk::style theme use clam
 ttk::style configure TFrame -background $bg_dark
-ttk::style configure Card.TFrame -background $bg_card -relief flat
-ttk::style configure TLabel -background $bg_dark -foreground $fg_light -font {"Helvetica" 11}
-ttk::style configure Title.TLabel -background $bg_dark -foreground $accent_blue -font {"Helvetica" 16 "bold"}
-ttk::style configure SubTitle.TLabel -background $bg_dark -foreground $fg_light -font {"Helvetica" 10 "italic"}
+ttk::style configure Card.TFrame -background $bg_card
+ttk::style configure TLabel -background $bg_dark -foreground $fg_light -font {Helvetica 10}
+ttk::style configure Title.TLabel -background $bg_dark -foreground $accent_blue -font {Helvetica 16 bold}
+ttk::style configure SubTitle.TLabel -background $bg_dark -foreground $fg_light -font {Helvetica 10 italic}
+ttk::style configure TButton -padding 6
 
-ttk::style configure TButton -font {"Helvetica" 10 "bold"} -padding 6
-ttk::style configure Create.TButton -background $accent_green -foreground "#11111B"
-ttk::style configure Run.TButton -background $accent_blue -foreground "#11111B"
-ttk::style configure Delete.TButton -background $accent_red -foreground "#11111B"
-
-# Header Banner
 ttk::frame .header -padding 15
-pack .header -fill x -side top
+pack .header -fill x
+ttk::label .header.title -text "Omega Virtual Device Manager" -style Title.TLabel
+pack .header.title -anchor w
+ttk::label .header.sub -text "Predefined profiles, ext4 artifact lifecycle, and managed OVD execution"
+pack .header.sub -anchor w
 
-ttk::label .header.title -text "Omega Virtual Device (OVD) Manager" -style Title.TLabel
-pack .header.title -side top -anchor w
+ttk::frame .body -padding 12
+pack .body -fill both -expand 1
 
-ttk::label .header.sub -text "Manage Omega OS virtual devices — x86_64 VGA; ARM/RISC-V SimpleFb with serial fallback" -style SubTitle.TLabel
-pack .header.sub -side top -anchor w
+ttk::frame .devices -style Card.TFrame -padding 10
+pack .devices -side left -fill both -expand 1 -padx {0 10}
+ttk::label .devices.title -text "Managed OVDs" -font {Helvetica 12 bold}
+pack .devices.title -anchor w -pady {0 8}
+ttk::treeview .devices.tree -columns {profile arch ram disk storage state} -show headings -selectmode browse
+foreach {column label width} {profile Profile 175 arch Architecture 90 ram RAM 70 disk Disk 70 storage Storage 85 state State 80} {
+    .devices.tree heading $column -text $label
+    .devices.tree column $column -width $width -anchor center
+}
+pack .devices.tree -fill both -expand 1
+.devices.tree bind <<TreeviewSelect>> {show_selected_summary}
 
-# Main Container Frame
-ttk::frame .main -padding 15
-pack .main -fill both -expand true -side top
+ttk::frame .controls -style Card.TFrame -padding 12
+pack .controls -side right -fill y
+ttk::label .controls.title -text "Create or manage" -font {Helvetica 12 bold}
+pack .controls.title -anchor w -pady {0 8}
 
-# Left Panel: Device List Treeview
-ttk::frame .main.left -style Card.TFrame -padding 10
-pack .main.left -side left -fill both -expand true -padx {0 10}
+ttk::label .controls.profile_label -text "Predefined profile"
+pack .controls.profile_label -anchor w
+ttk::combobox .controls.profile -state readonly -width 38
+pack .controls.profile -fill x -pady {0 6}
+.controls.profile bind <<ComboboxSelected>> {profile_changed}
 
-ttk::label .main.left.lbl -text "Configured Virtual Devices" -style TLabel -font {"Helvetica" 12 "bold"}
-pack .main.left.lbl -side top -anchor w -pady {0 10}
+ttk::label .controls.name_label -text "OVD name"
+pack .controls.name_label -anchor w
+ttk::entry .controls.name
+pack .controls.name -fill x -pady {0 6}
 
-ttk::treeview .main.left.tree -columns {arch ram disk storage state} -show headings -height 15
-.main.left.tree heading arch -text "Architecture"
-.main.left.tree heading ram -text "RAM (MB)"
-.main.left.tree heading disk -text "Disk (MB)"
-.main.left.tree heading storage -text "Storage"
-.main.left.tree heading state -text "State"
+ttk::label .controls.arch_label -text "Architecture"
+pack .controls.arch_label -anchor w
+ttk::combobox .controls.arch -values {x86_64 aarch64 riscv64} -state readonly
+pack .controls.arch -fill x -pady {0 6}
 
-.main.left.tree column arch -width 120 -anchor center
-.main.left.tree column ram -width 100 -anchor center
-.main.left.tree column disk -width 100 -anchor center
-.main.left.tree column storage -width 100 -anchor center
-.main.left.tree column state -width 85 -anchor center
+ttk::label .controls.ram_label -text "RAM (MB)"
+pack .controls.ram_label -anchor w
+ttk::entry .controls.ram
+pack .controls.ram -fill x -pady {0 6}
 
-pack .main.left.tree -fill both -expand true -side top
+ttk::label .controls.disk_label -text "Disk (MB)"
+pack .controls.disk_label -anchor w
+ttk::entry .controls.disk
+pack .controls.disk -fill x -pady {0 6}
 
-# Right Panel: Action Controls & Device Creator
-ttk::frame .main.right -style Card.TFrame -padding 15
-pack .main.right -side right -fill y -width 320
+ttk::label .controls.storage_label -text "Generic storage transport"
+pack .controls.storage_label -anchor w
+ttk::combobox .controls.storage -values {virtio ahci usb sd optical none} -state readonly
+pack .controls.storage -fill x -pady {0 6}
 
-ttk::label .main.right.create_title -text "Create New OVD" -style TLabel -font {"Helvetica" 12 "bold"}
-pack .main.right.create_title -side top -anchor w -pady {0 10}
+ttk::label .controls.network_label -text "Network"
+pack .controls.network_label -anchor w
+ttk::combobox .controls.network -values {none user socket} -state readonly
+pack .controls.network -fill x -pady {0 10}
 
-# Device Form
-ttk::label .main.right.name_lbl -text "Device Name:" -style TLabel
-pack .main.right.name_lbl -side top -anchor w
+ttk::button .controls.create_profile -text "Create from selected profile" -command create_from_profile
+pack .controls.create_profile -fill x -pady {0 5}
+ttk::button .controls.create_generic -text "Create generic OVD" -command create_generic
+pack .controls.create_generic -fill x -pady {0 12}
 
-entry .main.right.name_entry -bg "#313244" -fg "#CDD6F4" -insertbackground "#CDD6F4" -relief flat
-pack .main.right.name_entry -side top -fill x -pady {0 10}
+ttk::separator .controls.separator -orient horizontal
+pack .controls.separator -fill x -pady 5
+ttk::button .controls.inspect_profile -text "Inspect selected profile" -command inspect_profile
+pack .controls.inspect_profile -fill x -pady {0 5}
+ttk::button .controls.artifacts -text "Check profile artifacts (dry-run)" -command check_profile_artifacts
+pack .controls.artifacts -fill x -pady {0 12}
 
-ttk::label .main.right.arch_lbl -text "Architecture Target:" -style TLabel
-pack .main.right.arch_lbl -side top -anchor w
+ttk::label .controls.selected -text "No OVD selected" -wraplength 300
+pack .controls.selected -anchor w -pady {0 8}
+ttk::button .controls.launch_gui -text "Launch selected (GUI)" -command {launch_selected true}
+pack .controls.launch_gui -fill x -pady {0 5}
+ttk::button .controls.launch_headless -text "Launch selected (headless)" -command {launch_selected false}
+pack .controls.launch_headless -fill x -pady {0 5}
+ttk::button .controls.stop -text "Stop selected" -command stop_selected
+pack .controls.stop -fill x -pady {0 5}
+ttk::button .controls.logs -text "View selected logs" -command show_selected_logs
+pack .controls.logs -fill x -pady {0 5}
+ttk::button .controls.validate -text "Validate selected" -command validate_selected
+pack .controls.validate -fill x -pady {0 5}
+ttk::button .controls.delete -text "Delete selected" -command delete_selected
+pack .controls.delete -fill x
 
-ttk::combobox .main.right.arch_combo -values {"x86_64" "aarch64" "riscv64"} -state readonly
-.main.right.arch_combo set "x86_64"
-pack .main.right.arch_combo -side top -fill x -pady {0 10}
+proc run_manager {args} {
+    global MANAGER
+    if {[catch {exec bash $MANAGER {*}$args} result options]} {
+        set detail $result
+        if {[dict exists $options -errorinfo]} {set detail [dict get $options -errorinfo]}
+        return -code error $detail
+    }
+    return $result
+}
 
-ttk::label .main.right.ram_lbl -text "RAM Size (MB):" -style TLabel
-pack .main.right.ram_lbl -side top -anchor w
-
-entry .main.right.ram_entry -bg "#313244" -fg "#CDD6F4" -insertbackground "#CDD6F4" -relief flat
-.main.right.ram_entry insert 0 "1024"
-pack .main.right.ram_entry -side top -fill x -pady {0 10}
-
-ttk::label .main.right.disk_lbl -text "Storage Disk (MB):" -style TLabel
-pack .main.right.disk_lbl -side top -anchor w
-
-entry .main.right.disk_entry -bg "#313244" -fg "#CDD6F4" -insertbackground "#CDD6F4" -relief flat
-.main.right.disk_entry insert 0 "64"
-pack .main.right.disk_entry -side top -fill x -pady {0 15}
-
-ttk::label .main.right.storage_lbl -text "Storage Profile:" -style TLabel
-pack .main.right.storage_lbl -side top -anchor w
-ttk::combobox .main.right.storage_combo -values {virtio ahci usb sd optical none} -state readonly
-.main.right.storage_combo set "virtio"
-pack .main.right.storage_combo -side top -fill x -pady {0 10}
-
-ttk::label .main.right.network_lbl -text "Network Profile:" -style TLabel
-pack .main.right.network_lbl -side top -anchor w
-ttk::combobox .main.right.network_combo -values {none user socket} -state readonly
-.main.right.network_combo set "none"
-pack .main.right.network_combo -side top -fill x -pady {0 15}
-
-# Create Button
-button .main.right.btn_create -text "Create Virtual Device" -bg $accent_green -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command create_device
-pack .main.right.btn_create -side top -fill x -pady {0 20}
-
-# Divider
-ttk::separator .main.right.sep -orient horizontal
-pack .main.right.sep -side top -fill x -pady 10
-
-# Execution Buttons
-ttk::label .main.right.run_title -text "Device Execution" -style TLabel -font {"Helvetica" 12 "bold"}
-pack .main.right.run_title -side top -anchor w -pady {0 10}
-
-button .main.right.btn_run_gui -text "Launch (GUI — VGA / experimental VirtIO-GPU)" -bg $accent_blue -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command run_device_gui
-pack .main.right.btn_run_gui -side top -fill x -pady {0 8}
-
-button .main.right.btn_run_head -text "Launch (Headless / SimpleFb fallback)" -bg "#89DCEB" -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command run_device_headless
-pack .main.right.btn_run_head -side top -fill x -pady {0 8}
-
-button .main.right.btn_stop -text "Stop Selected Device" -bg "#F9E2AF" -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command stop_device
-pack .main.right.btn_stop -side top -fill x -pady {0 8}
-
-button .main.right.btn_logs -text "View Selected Device Logs" -bg "#BAC2DE" -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command show_device_logs
-pack .main.right.btn_logs -side top -fill x -pady {0 8}
-
-button .main.right.btn_delete -text "Delete Selected Device" -bg $accent_red -fg "#11111B" -font {"Helvetica" 10 "bold"} -relief flat -command delete_device
-pack .main.right.btn_delete -side top -fill x
-
-# Procedures
-proc refresh_device_list {} {
-    .main.left.tree delete [.main.left.tree children {}]
-    set script_path "[file dirname [info script]]/ovd_manager.sh"
-    if {[catch {exec bash $script_path list} output]} {
+proc refresh_profiles {} {
+    global PROFILE_TOOL PROFILE_META
+    set previous [.controls.profile get]
+    set original $previous
+    set names {"(generic OVD)"}
+    catch {unset PROFILE_META}
+    array set PROFILE_META {}
+    if {[catch {exec python3 $PROFILE_TOOL list --tsv} output]} {
+        .controls.profile configure -values $names
+        .controls.profile set "(generic OVD)"
+        profile_changed
         return
     }
-    set current_name ""
-    set current_arch ""
-    set current_ram ""
-    set current_disk ""
-    set current_storage ""
-    set current_state ""
+    foreach line [split [string trim $output] "\n"] {
+        if {$line eq ""} continue
+        set fields [split $line "\t"]
+        if {[llength $fields] != 8} continue
+        lassign $fields profile display arch backend status default_ram image_size native_creation
+        lappend names $profile
+        set PROFILE_META($profile) [list $display $arch $backend $status $default_ram $image_size $native_creation]
+    }
+    .controls.profile configure -values $names
+    if {[lsearch -exact $names $previous] < 0} {set previous "(generic OVD)"}
+    .controls.profile set $previous
+    if {$original ne [.controls.profile get]} {profile_changed}
+}
 
+proc profile_changed {} {
+    global PROFILE_META
+    set profile [.controls.profile get]
+    if {$profile eq "(generic OVD)" || ![info exists PROFILE_META($profile)]} {
+        .controls.create_profile state disabled
+        .controls.inspect_profile state disabled
+        .controls.artifacts state disabled
+        .controls.arch state !disabled
+        .controls.ram state !disabled
+        .controls.disk state !disabled
+        .controls.storage state !disabled
+        return
+    }
+    lassign $PROFILE_META($profile) display arch backend status default_ram image_size native_creation
+    if {$native_creation eq "true"} {
+        .controls.create_profile state !disabled
+    } else {
+        .controls.create_profile state disabled
+    }
+    .controls.inspect_profile state !disabled
+    .controls.artifacts state !disabled
+    .controls.arch set $arch
+    .controls.arch state disabled
+    .controls.storage set virtio
+    .controls.storage state disabled
+    .controls.ram delete 0 end
+    .controls.disk delete 0 end
+    .controls.ram insert 0 $default_ram
+    .controls.disk insert 0 $image_size
+    .controls.selected configure -text "Profile: $profile\n$display\nBackend: $backend\nStatus: $status"
+}
+
+proc refresh_devices {} {
+    .devices.tree delete [.devices.tree children {}]
+    if {[catch {run_manager list} output]} return
+    set name {}; set profile {}; set arch {}; set ram {}; set disk {}; set storage {}
     foreach line [split $output "\n"] {
-        if {[string match "Device: *" $line]} {
-            set current_name [string range $line 8 end]
-        } elseif {[string match "  ovd.arch=*" $line]} {
-            set current_arch [string range $line 11 end]
-        } elseif {[string match "  ovd.ram=*" $line]} {
-            set current_ram [string range $line 10 end]
-        } elseif {[string match "  ovd.disk=*" $line]} {
-            set current_disk [string range $line 11 end]
-        } elseif {[string match "  ovd.storage=*" $line]} {
-            set current_storage [string range $line 14 end]
-        } elseif {[string match "  ovd.state=*" $line]} {
-            set current_state [string range $line 12 end]
-            if {$current_name ne ""} {.main.left.tree insert {} end -id $current_name -values [list $current_arch $current_ram $current_disk $current_storage $current_state]}
+        if {[string match "Device: *" $line]} {set name [string range $line 8 end]}
+        if {[string match "  ovd.arch=*" $line]} {set arch [string range $line 11 end]}
+        if {[string match "  ovd.ram=*" $line]} {set ram [string range $line 10 end]}
+        if {[string match "  ovd.disk=*" $line]} {set disk [string range $line 11 end]}
+        if {[string match "  ovd.storage=*" $line]} {set storage [string range $line 14 end]}
+        if {[string match "  ovd.profile=*" $line]} {set profile [string range $line 14 end]}
+        if {[string match "  ovd.state=*" $line]} {
+            set state [string range $line 12 end]
+            if {$name ne ""} {.devices.tree insert {} end -id $name -values [list $profile $arch $ram $disk $storage $state]}
+            set name {}; set profile {}
         }
     }
+    show_selected_summary
 }
 
-proc create_device {} {
-    set name [.main.right.name_entry get]
-    set arch [.main.right.arch_combo get]
-    set ram [.main.right.ram_entry get]
-    set disk [.main.right.disk_entry get]
-    set storage [.main.right.storage_combo get]
-    set network [.main.right.network_combo get]
+proc selected_device {} {
+    set selected [.devices.tree selection]
+    if {$selected eq ""} {tk_messageBox -icon warning -message "Select an OVD first."; return ""}
+    return [lindex $selected 0]
+}
 
-    if {$name eq ""} {
-        tk_messageBox -icon error -message "Please enter a valid Device Name."
+proc show_selected_summary {} {
+    set selected [.devices.tree selection]
+    if {$selected eq ""} {.controls.selected configure -text "No OVD selected"; return}
+    set values [.devices.tree item [lindex $selected 0] -values]
+    .controls.selected configure -text "Selected: [lindex $selected 0]\nProfile: [lindex $values 0]\nState: [lindex $values 5]"
+}
+
+proc create_from_profile {} {
+    set profile [.controls.profile get]
+    set name [.controls.name get]
+    if {$profile eq "(generic OVD)" || $name eq ""} {tk_messageBox -icon error -message "Select a native profile and enter an OVD name."; return}
+    if {[catch {run_manager create-from-profile --profile $profile --name $name --ram [.controls.ram get] --disk [.controls.disk get]} result]} {
+        tk_messageBox -icon error -title "Profile creation failed" -message $result
         return
     }
+    refresh_devices
+    .controls.name delete 0 end
+}
 
-    set script_path "[file dirname [info script]]/ovd_manager.sh"
-    if {[catch {exec bash $script_path create --name $name --arch $arch --ram $ram --disk $disk --storage $storage --network $network} res]} {
-        tk_messageBox -icon error -message "Failed to create OVD device:\n$res"
-    } else {
-        refresh_device_list
-        .main.right.name_entry delete 0 end
+proc create_generic {} {
+    set name [.controls.name get]
+    if {$name eq ""} {tk_messageBox -icon error -message "Enter an OVD name."; return}
+    if {[catch {run_manager create --name $name --arch [.controls.arch get] --ram [.controls.ram get] --disk [.controls.disk get] --storage [.controls.storage get] --network [.controls.network get]} result]} {
+        tk_messageBox -icon error -title "OVD creation failed" -message $result
+        return
     }
+    refresh_devices
+    .controls.name delete 0 end
 }
 
-proc get_selected_device {} {
-    set selected [.main.left.tree selection]
-    if {$selected eq ""} {
-        tk_messageBox -icon warning -message "Please select a Virtual Device from the list."
-        return ""
-    }
-    return $selected
+proc inspect_profile {} {
+    set profile [.controls.profile get]
+    if {$profile eq "(generic OVD)"} return
+    if {[catch {run_manager profiles show --profile $profile --json} result]} {tk_messageBox -icon error -message $result; return}
+    tk_messageBox -title "Profile: $profile" -message $result
 }
 
-proc run_device_gui {} {
-    set dev [get_selected_device]
+proc check_profile_artifacts {} {
+    set profile [.controls.profile get]
+    if {$profile eq "(generic OVD)"} return
+    if {[catch {run_manager profiles artifacts --profile $profile --dry-run} result]} {tk_messageBox -icon error -message $result; return}
+    tk_messageBox -title "Artifacts: $profile" -message $result
+}
+
+proc launch_selected {gui} {
+    set dev [selected_device]
     if {$dev eq ""} return
-    set script_path "[file dirname [info script]]/ovd_run.sh"
-    exec bash $script_path run --name $dev --gpu --daemon &
+    set mode [expr {$gui ? "--gpu" : "--no-gpu"}]
+    if {[catch {exec bash [file join [file dirname [info script]] ovd_run.sh] run --name $dev $mode --daemon &} result]} {tk_messageBox -icon error -message $result}
+    refresh_devices
 }
 
-proc run_device_headless {} {
-    set dev [get_selected_device]
+proc stop_selected {} {
+    set dev [selected_device]
     if {$dev eq ""} return
-    set script_path "[file dirname [info script]]/ovd_run.sh"
-    exec bash $script_path run --name $dev --no-gpu --daemon &
+    if {[catch {run_manager stop --name $dev} result]} {tk_messageBox -icon error -message $result}
+    refresh_devices
 }
 
-proc stop_device {} {
-    set dev [get_selected_device]
+proc show_selected_logs {} {
+    set dev [selected_device]
     if {$dev eq ""} return
-    set script_path "[file dirname [info script]]/ovd_manager.sh"
-    if {[catch {exec bash $script_path stop --name $dev} res]} {
-        tk_messageBox -icon error -message "Failed to stop OVD device:\n$res"
-    } else {
-        refresh_device_list
-    }
+    if {[catch {run_manager logs --name $dev} result]} {tk_messageBox -icon info -message "No emulator log is available yet."; return}
+    tk_messageBox -title "OVD Logs: $dev" -message $result
 }
 
-proc show_device_logs {} {
-    set dev [get_selected_device]
+proc validate_selected {} {
+    set dev [selected_device]
     if {$dev eq ""} return
-    set script_path "[file dirname [info script]]/ovd_manager.sh"
-    if {[catch {exec bash $script_path logs --name $dev} res]} {
-        tk_messageBox -icon info -message "No emulator log is available yet."
-    } else {
-        tk_messageBox -title "OVD Logs: $dev" -message $res
-    }
+    if {[catch {run_manager validate --name $dev} result]} {tk_messageBox -icon error -message $result; return}
+    tk_messageBox -icon info -title "Validation passed" -message $result
 }
 
-proc delete_device {} {
-    set dev [get_selected_device]
+proc delete_selected {} {
+    set dev [selected_device]
     if {$dev eq ""} return
-    set answer [tk_messageBox -message "Are you sure you want to delete '$dev'?" -type yesno -icon question]
-    if {$answer eq "yes"} {
-        set script_path "[file dirname [info script]]/ovd_manager.sh"
-        exec bash $script_path delete --name $dev
-        refresh_device_list
-    }
+    if {[tk_messageBox -type yesno -icon question -message "Delete '$dev'?"] ne "yes"} return
+    if {[catch {run_manager delete --name $dev} result]} {tk_messageBox -icon error -message $result; return}
+    refresh_devices
 }
 
-# Initial and periodic list refresh
 proc schedule_refresh {} {
-    refresh_device_list
-    after 2000 schedule_refresh
+    refresh_profiles
+    refresh_devices
+    after 3000 schedule_refresh
 }
-schedule_refresh
+
+.controls.arch set x86_64
+.controls.ram insert 0 1024
+.controls.disk insert 0 64
+.controls.storage set virtio
+.controls.network set none
+refresh_profiles
+refresh_devices
+after 3000 schedule_refresh

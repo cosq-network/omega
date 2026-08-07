@@ -30,7 +30,7 @@ Phases **1–6** cover the research-kernel foundation (completed). Phases **7–
 | **Phase 5.5: VirtIO Network Stack** | `COMPLETED` | VirtIO-Net packet driver & TCP/IP stack | L2 Ethernet, L3 IPv4, L4 UDP/TCP headers | Frame RX Reader |
 | **Phase 6A: Bootable Disk Generator** | `COMPLETED` | UEFI/GPT multi-format disk generator | RAW, QCOW2, VMDK, VDI with FAT32 payloads | `create_bootable_disk.sh` |
 | **Phase 6B: Firmware Compatibility** | `COMPLETED` | U-Boot (`bootefi`/`booti`) & Coreboot (EDK2/GRUB) | Embedded `/EFI/BOOT/` & `/boot/omega.elf` | `docs/FIRMWARE_BOOT.md` |
-| **Phase 6C: OVD Emulator & GUI** | `COMPLETED` | Omega Virtual Device Manager & Tcl/Tk GUI; multi-architecture display, storage, networking, and lifecycle tooling | Schema validation, safe paths, `--gpu` / `--no-gpu`, storage/network profiles, daemon/QMP state, snapshots, import/export, dry-run, GUI status/log controls | `test_ovd_unit.sh`, `test_ovd.sh`, `test_ovd_gui.tcl` |
+| **Phase 6C: OVD Emulator & GUI** | `COMPLETED` | Omega Virtual Device Manager & profile-aware Tcl/Tk GUI; multi-architecture display, storage, networking, artifact, and lifecycle tooling | Schema validation, predefined profiles, catalog defaults, ext4 artifact checks/refresh, safe paths, `--gpu` / `--no-gpu`, storage/network profiles, daemon/QMP state, snapshots, import/export, dry-run, GUI status/log controls | `test_ovd_unit.sh`, `test_profile_catalog.sh`, `test_ovd.sh`, `test_ovd_gui.tcl` |
 | **Phase 6D: Containerization & CI/CD** | `COMPLETED` | Alpine Dockerfile, DevContainers, GitHub Actions | DevContainers, Codespaces, GitHub Actions CI/CD incl. `test_display.sh` | `.github/workflows/ci.yml` |
 
 ---
@@ -71,7 +71,7 @@ Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsys
 
 | Milestone | Status | Description | Key Deliverables | Verification |
 | :--- | :---: | :--- | :--- | :---: |
-| **Phase 7.1: Storage Core & VirtIO-Block** | `IN PROGRESS` | Common storage API, device graph, DMA foundation, and guarded VirtIO-Block reference driver | Request validation, lifecycle binding, MMIO VirtIO, partition metadata, controlled writes, protocol-driver expansion | Host unit tests, QEMU storage tests, and cross-architecture builds |
+| **Phase 7.1: Storage Core & VirtIO-Block** | `IN PROGRESS` | Common storage API, device graph, DMA foundation, and guarded VirtIO-Block reference driver | Request validation, lifecycle binding, MMIO/legacy PCI VirtIO, partition metadata, controlled writes, protocol-driver expansion | Host unit tests, x86_64 QEMU runtime completion, profile-backed ext4 tests, and cross-architecture builds |
 | **Phase 7.2: System Display Module (Standard VGA)** | `COMPLETED` | x86_64 VGA text mode, Bochs VBE linear FB, dual serial+display console | `hal::Display`, Bochs DISPI 1024×768×32, 8×16 font, Multiboot2 FB tag, `kprintf` mirroring | `scripts/test_display.sh`, CI, OVD `--gpu` |
 | **Phase 7.2b: AArch64 & RISC-V Display** | `IN PROGRESS` | SimpleFb (DT), shared FDT parser, portable framebuffer console, and guarded VirtIO-GPU MMIO foundation | FDT walker, DT pointer handoff, `SimpleFb` HALs, identity-map VMM bring-up, VirtIO-GPU protocol/queue scaffold, serial fallback | `scripts/test_display_aarch64.sh`, QEMU AArch64/RISC-V smoke tests |
 | **Phase 7.3: SMP Multi-Core** | `PLANNED` | Symmetric multiprocessing across all cores | APIC ICR (x86), PSCI (AArch64), OpenSBI IPI (RISC-V); per-CPU run queues | Multi-core boot log, parallel thread execution |
@@ -89,13 +89,13 @@ The storage roadmap is defined in [`docs/STORAGE_ARCHITECTURE_PLAN.md`](STORAGE_
 | :--- | :---: | :--- |
 | **7.1a Storage core and DMA** | `PARTIAL` | Common request/status API, device registry and lifecycle states, validation, DMA mapping foundation, and synthetic backend validated on all ISAs; asynchronous completion, cancellation, and production bounce-buffer paths remain |
 | **7.1b Partitions and read-only filesystems** | `PARTIAL` | GPT/MBR metadata parser added; FAT32, ext4, ISO9660, and UDF mounting remain |
-| **7.1c VirtIO-Block** | `EXPERIMENTAL` | VirtIO MMIO discovery, feature negotiation, queue setup, capacity, read/write/flush request encoding, and opt-in AArch64/RISC-V cross-builds; runtime queue completion validation remains |
+| **7.1c VirtIO-Block** | `PARTIAL` | x86_64 transitional VirtIO-PCI discovery, legacy queue geometry, feature negotiation, read/write/flush completion, and QEMU runtime verification; VirtIO-MMIO AArch64/RISC-V completion and modern PCI transport remain experimental |
 | **7.1d NVMe** | `PLANNED` | NVMe controller, namespaces, PRP reads, reset recovery |
 | **7.1e AHCI/SATA/ATAPI** | `PLANNED` | SATA SSD/HDD reads and CD/DVD packet reads |
 | **7.1f SDHCI and USB Mass Storage** | `PLANNED` | SD/microSD, xHCI, BOT/UAS, USB flash and optical media |
 | **7.1g Controlled writes** | `PARTIAL` | Common writable/read-only policy, FUA/barrier flags, flush dispatch, and synthetic write tests; filesystem/hardware writes remain |
 | **7.1h Storage emulator and test harness** | `COMPLETED` | QEMU storage profiles in OVD and x86 launcher; script/OVD unit tests, dry-run command inspection, and all-ISA storage integration tests |
-| **7.1i Emulator manageability and UX** | `COMPLETED` | OVD schema validation, configurable roots, lifecycle state, daemon logs, QMP monitor support, networking, initrd, ephemeral mode, snapshots, clone/import/export, and GUI controls |
+| **7.1i Emulator manageability and UX** | `COMPLETED` | OVD schema validation, configurable roots, lifecycle state, daemon logs, QMP monitor support, networking, initrd, ephemeral mode, snapshots, clone/import/export, predefined profile catalog, ext4 artifact refresh, and profile-aware GUI controls |
 
 ### Current Phase 7.1 implementation boundary
 
@@ -106,9 +106,12 @@ Implemented and verified:
 - DMA allocation/mapping foundation and a synthetic writable memory block used
   for deterministic tests.
 - GPT/MBR metadata parsing with host-side unit coverage.
-- Guarded VirtIO-Block MMIO discovery and request encoding, including writes
-  and flushes; default builds do not activate it until legacy-MMIO queue
-  completion is validated.
+- Guarded VirtIO-Block discovery and request encoding, including x86_64
+  transitional PCI read/write/flush completion under QEMU; AArch64/RISC-V
+  VirtIO-MMIO runtime completion remains opt-in pending device-specific tests.
+- Profile-backed native OVD artifacts resolve the current kernel and generate
+  a matching ext4 raw image; dry-run and real-image integration tests validate
+  manifest, copy, and launcher wiring when `mke2fs`/`mkfs.ext4` is installed.
 - QEMU/OVD storage transport wiring and dry-run inspection for the supported
   emulator profiles.
 - Unit and integration coverage across x86_64, AArch64, and RISC-V.
@@ -273,16 +276,16 @@ Markdown reports, profile-to-hardware mappings, schema validation, deterministic
 command rendering, external dependency checks, CI lanes, ownership, and
 deprecation policy. Native profiles must resolve the latest compatible
 `omega.elf` and matching disk-image manifest; missing or stale artifacts are
-built before launch. The planned default Omega system filesystem is ext4,
+built before launch. The default Omega system filesystem is ext4,
 with FAT32 retained only for an explicit boot/ESP compatibility partition or
 legacy boot-image mode.
 
 | OVD profile milestone | Status | Scope |
 | --- | --- | --- |
-| **R0 Registry foundation** | `PLANNED` | Schema, catalog, IDs, status, ownership, and validation |
-| **R1 Native QEMU profiles** | `PLANNED` | x86_64 `q35`/`pc`, AArch64 `virt`, and RISC-V `virt` |
+| **R0 Registry foundation** | `PARTIAL` | Versioned JSON schema/catalog, IDs, status, deterministic validation, listing, and rendering are implemented |
+| **R1 Native QEMU profiles** | `PARTIAL` | x86_64 `q35`/`pc`, AArch64 `virt`, and RISC-V `virt` definitions plus kernel freshness, staged ext4 image resolution, and verified OVD refresh |
 | **R2 Generated reports** | `PLANNED` | Deterministic CSV, JSON, Markdown, and lock artifacts |
-| **R3 OVD integration** | `PLANNED` | Profile list/show/validate/create-from-profile and GUI support |
+| **R3 OVD integration** | `PARTIAL` | Profile list/show/validate/render/artifacts commands, native create-from-profile path, profile-aware Tcl/Tk management, and verified image refresh are wired; external adapters remain |
 | **R4 Android adapter** | `PLANNED` | AVD discovery, launch, GPU, ADB, snapshots, and cleanup |
 | **R5 VMApple adapter** | `PLANNED` | Apple-Silicon/macOS prerequisite and conditional launch workflow |
 | **R6 Physical mappings** | `PLANNED` | Hardware records linked to virtual approximations |
@@ -485,14 +488,14 @@ Year 4–5      Phase 10C + 11       Phone product, public release, OEM partners
 
 Concrete sequence mapped to the existing codebase:
 
-1. **Complete Phase 7** — validate VirtIO-Block completion, add NVMe/AHCI/SDHCI/USB storage drivers, complete **Phase 7.2b display on AArch64/RISC-V** (see `docs/DISPLAY_AARCH64_RISCV_PLAN.md`), SMP, timer preemption, per-process VM, and IPC. *(Standard VGA on x86_64 is done — Phase 7.2.)*
+1. **Complete Phase 7** — add NVMe/AHCI/SDHCI/USB storage drivers, complete **Phase 7.2b display on AArch64/RISC-V** (see `docs/DISPLAY_AARCH64_RISCV_PLAN.md`), and extend VirtIO-MMIO runtime completion beyond x86_64. *(Standard VGA and x86_64 transitional VirtIO-Block completion are validated.)*
 2. **Select first real board** — QEMU `virt` → Raspberry Pi 4/5 → one x86_64 laptop.
 3. **Userspace init process** — Minimal init that spawns a shell over serial (validates ELF loader + syscalls end-to-end).
 4. **IPC + driver framework** — Storage, network, and display as privileged userspace servers.
 5. **Port musl (or minimal libc)** — Expand syscalls to POSIX subset required by libc.
 6. **Extend graphical console** — Scrollback, ANSI colors, userspace compositor path (kernel FB console is in place).
 7. **Freeze v1 ABI** — Document and version the syscall and IPC interfaces (`docs/ABI.md`).
-8. **Extend OVD emulator** — lifecycle management, storage/network profiles, QMP state, snapshots, import/export, and GUI controls are now wired; next add validated VirtIO-Block runtime completion, VirtIO-GPU + SimpleFb for AArch64/RISC-V, device hotplug scenarios, and richer QEMU machine capability detection.
+8. **Extend OVD emulator** — lifecycle management, storage/network profiles, QMP state, snapshots, import/export, GUI controls, x86_64 VirtIO-Block runtime completion, and profile-backed ext4 artifact tests are wired; next add VirtIO-GPU + SimpleFb for AArch64/RISC-V, device hotplug scenarios, and richer QEMU machine capability detection.
 9. **Defer phone work** — Until laptop/tablet daily-driver quality is demonstrated.
 
 ---

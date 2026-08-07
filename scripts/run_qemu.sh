@@ -79,7 +79,7 @@ if [ "${STORAGE}" != none ]; then
     [ "${READONLY}" = true ] && readonly_arg=",readonly=on" || readonly_arg=""
     case "${STORAGE}" in
         auto) QEMU_ARGS+=( -drive "file=${STORAGE_IMAGE},format=raw,index=0,media=disk${readonly_arg}" );;
-        virtio) QEMU_ARGS+=( -drive "file=${STORAGE_IMAGE},format=raw,if=none,id=storage0${readonly_arg}" -device virtio-blk-pci,drive=storage0 );;
+        virtio) QEMU_ARGS+=( -drive "file=${STORAGE_IMAGE},format=raw,if=none,id=storage0${readonly_arg}" -device virtio-blk-pci,disable-modern=on,drive=storage0 );;
         ahci) QEMU_ARGS+=( -drive "file=${STORAGE_IMAGE},format=raw,if=ide,index=0,media=disk${readonly_arg}" );;
         usb) QEMU_ARGS+=( -drive "file=${STORAGE_IMAGE},format=raw,if=none,id=storage0${readonly_arg}" -device usb-storage,drive=storage0 );;
     esac

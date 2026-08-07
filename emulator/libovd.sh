@@ -94,6 +94,10 @@ ovd_config_value() {
         display) value="$(ovd_config_get_or "${file}" ovd.display.profile "")" ;;
         network) value="$(ovd_config_get_or "${file}" ovd.network.profile none)" ;;
         initrd) value="$(ovd_config_get_or "${file}" ovd.initrd "")" ;;
+        profile_id) value="$(ovd_config_get_or "${file}" ovd.profile.id "")" ;;
+        filesystem) value="$(ovd_config_get_or "${file}" ovd.filesystem.system "")" ;;
+        boot_filesystem) value="$(ovd_config_get_or "${file}" ovd.filesystem.boot "")" ;;
+        artifact_policy) value="$(ovd_config_get_or "${file}" ovd.artifacts.policy require)" ;;
         *) ovd_error "Unknown OVD config field '${field}'."; return 1 ;;
     esac
     printf '%s\n' "${value}"
@@ -113,6 +117,17 @@ ovd_validate_config() {
     network="$(ovd_config_value "${file}" network)"; ovd_validate_network "${network}"
     image="$(ovd_config_value "${file}" image)"
     [[ "${image}" != /* && "${image}" != *..* ]] || ovd_error "Storage image must remain inside the OVD directory."
+    local profile_id filesystem boot_filesystem
+    profile_id="$(ovd_config_value "${file}" profile_id)"
+    filesystem="$(ovd_config_value "${file}" filesystem)"
+    boot_filesystem="$(ovd_config_value "${file}" boot_filesystem)"
+    if [ -n "${profile_id}" ]; then
+        [ "${filesystem}" = ext4 ] || ovd_error "Profile-backed Omega system images must use ext4."
+        [ -z "${boot_filesystem}" ] || [ "${boot_filesystem}" = fat32 ] || ovd_error "Profile boot filesystem must be fat32 or ext4."
+        local artifact_policy
+        artifact_policy="$(ovd_config_value "${file}" artifact_policy)"
+        case "${artifact_policy}" in require|build-if-missing|build-if-stale|always-build|reuse-verified) ;; *) ovd_error "Unsupported artifact policy '${artifact_policy}'." ;; esac
+    fi
     if [ "${OVD_SKIP_IMAGE_CHECK:-false}" != true ]; then
         [ -f "$(ovd_path "$1")/${image}" ] || ovd_error "Storage image is missing: ${image}"
     fi

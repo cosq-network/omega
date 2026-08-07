@@ -153,6 +153,14 @@ Status Manager::submit_sync(Device* device, Request* request) {
         request->context = original_context;
         return submit_status;
     }
+    // Flush is exposed as a synchronous DeviceOps operation rather than as a
+    // callback-bearing request. A successful flush therefore completes the
+    // synchronous wrapper even though no request callback was invoked.
+    if (request->type == RequestType::Flush && !sync.completed) {
+        request->complete = original;
+        request->context = original_context;
+        return Status::Success;
+    }
     if (!sync.completed) {
         request->complete = original;
         request->context = original_context;

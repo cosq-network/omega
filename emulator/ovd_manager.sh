@@ -13,6 +13,9 @@ usage() {
 Usage:
   $0 create --name NAME --arch ARCH [--ram MB] [--disk MB] [--storage PROFILE]
             [--network none|user|socket] [--display PROFILE] [--initrd FILE]
+  $0 create-from-profile --profile PROFILE --name NAME [--ram MB] [--disk MB]
+  $0 profiles list [--json]
+  $0 profiles show|validate|render|artifacts --profile PROFILE [--json|--dry-run]
   $0 list [--json]
   $0 show|validate|status|logs --name NAME
   $0 start --name NAME [launcher options]
@@ -31,6 +34,60 @@ USAGE
 }
 
 require_name() { [ -n "${1:-}" ] || { echo -e "${RED}[ERROR] OVD name is required.${NC}" >&2; usage; }; ovd_validate_name "$1"; }
+PROFILE_TOOL="${PROJECT_ROOT}/emulator/profile_catalog.py"
+
+profile_command() {
+    [ -x "${PROFILE_TOOL}" ] || ovd_error "Profile catalog tool is missing or not executable: ${PROFILE_TOOL}"
+    python3 "${PROFILE_TOOL}" "$@"
+}
+
+profile_ovd() {
+    local profile='' name='' ram='' disk=''
+    while (($#)); do
+        case "$1" in
+            --profile) profile="${2:-}"; shift 2;; --name) name="${2:-}"; shift 2;;
+            --ram) ram="${2:-}"; shift 2;; --disk) disk="${2:-}"; shift 2;; *) usage;;
+        esac
+    done
+    [ -n "${profile}" ] && require_name "${name}"
+    [ -n "${name}" ] || usage
+    local profile_json arch default_ram image_size display backend
+    profile_json="$(profile_command show --profile "${profile}" --json)"
+    arch="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["architecture"])' <<<"${profile_json}")"
+    backend="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["backend"])' <<<"${profile_json}")"
+    [ "${backend}" = qemu ] || ovd_error "Profile backend '${backend}' requires its external adapter and cannot create a native OVD instance."
+    default_ram="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["memory"]["default_mb"])' <<<"${profile_json}")"
+    image_size="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["storage"]["image_size_mb"])' <<<"${profile_json}")"
+    display="$(python3 -c 'import json,sys; print(json.load(sys.stdin)["display"]["backend"])' <<<"${profile_json}")"
+    ram="${ram:-${default_ram}}"; disk="${disk:-${image_size}}"
+    ovd_validate_arch "${arch}"; ovd_validate_uint RAM "${ram}" 128 1048576; ovd_validate_uint Disk "${disk}" 1 16777216
+    [ "${disk}" = "${image_size}" ] || ovd_error "Profile '${profile}' provides a ${image_size} MB system image; disk override must match that size."
+    local path; path="$(ovd_path "${name}")"; [ ! -e "${path}" ] || ovd_error "OVD '${name}' already exists."
+    profile_command artifacts --profile "${profile}" >/dev/null
+    mkdir -p "${path}/state"
+    cat > "${path}/config.ini" <<EOF
+ovd.schema=${OVD_SCHEMA_VERSION}
+ovd.name=${name}
+ovd.arch=${arch}
+ovd.ram_mb=${ram}
+ovd.disk_mb=${disk}
+ovd.storage.profile=virtio
+ovd.storage.image=system.ext4
+ovd.storage.format=raw
+ovd.storage.readonly=false
+ovd.filesystem.system=ext4
+ovd.filesystem.boot=fat32
+ovd.profile.id=${profile}
+ovd.artifacts.policy=build-if-stale
+ovd.display.profile=${display}
+ovd.network.profile=user
+ovd.initrd=
+EOF
+    local image_source
+    image_source="${OVD_IMAGE_ROOT}/omega-${profile}-ext4.raw"
+    cp "${image_source}" "${path}/system.ext4"
+    echo -e "${GREEN}[+] Created OVD '${name}' from profile '${profile}'.${NC}"
+}
 
 create_ovd() {
     local name='' arch='x86_64' ram=1024 disk=64 storage=virtio network=none display='' initrd=''
@@ -84,7 +141,7 @@ list_ovd() {
             printf '{"name":"%s","arch":"%s","ram_mb":%s,"disk_mb":%s,"storage":"%s","state":"%s"}' "$name" "$arch" "$ram" "$disk" "$storage" "$state"
         else
             printf 'Device: %s\n' "$name"
-            printf '  ovd.arch=%s\n  ovd.ram=%s\n  ovd.disk=%s\n  ovd.storage=%s\n  ovd.state=%s\n' "$arch" "$ram" "$disk" "$storage" "$state"
+            printf '  ovd.arch=%s\n  ovd.ram=%s\n  ovd.disk=%s\n  ovd.storage=%s\n  ovd.profile=%s\n  ovd.state=%s\n' "$arch" "$ram" "$disk" "$storage" "$(ovd_config_value "${file}" profile_id)" "$state"
             echo "-----------------------------------------"
         fi
     done
@@ -103,5 +160,5 @@ snapshot_ovd() { local action="${1:-}" name='' snap=''; shift || true; while (($
 
 command="${1:-}"; shift || true
 case "${command}" in
-    create) create_ovd "$@";; list) list_ovd "$@";; show) [[ "${1:-}" = --name ]] || usage; show_ovd "${2:-}";; validate) [[ "${1:-}" = --name ]] || usage; validate_ovd "${2:-}";; start) start_ovd "$@";; stop) stop_ovd "$@";; status) [[ "${1:-}" = --name ]] || usage; ovd_validate_config "${2:-}"; ovd_pid_running "${2:-}" && echo running || echo stopped;; logs) [[ "${1:-}" = --name ]] || usage; cat "$(ovd_log_file "${2:-}")" 2>/dev/null || ovd_error "No QEMU log exists.";; delete) delete_ovd "$@";; clone) clone_ovd "$@";; export) archive_ovd "$@";; import) import_ovd "$@";; snapshot) snapshot_ovd "$@";; *) usage;;
+    create) create_ovd "$@";; list) list_ovd "$@";; show) [[ "${1:-}" = --name ]] || usage; show_ovd "${2:-}";; validate) [[ "${1:-}" = --name ]] || usage; validate_ovd "${2:-}";; start) start_ovd "$@";; stop) stop_ovd "$@";; status) [[ "${1:-}" = --name ]] || usage; ovd_validate_config "${2:-}"; ovd_pid_running "${2:-}" && echo running || echo stopped;; logs) [[ "${1:-}" = --name ]] || usage; cat "$(ovd_log_file "${2:-}")" 2>/dev/null || ovd_error "No QEMU log exists.";; delete) delete_ovd "$@";; clone) clone_ovd "$@";; export) archive_ovd "$@";; import) import_ovd "$@";; snapshot) snapshot_ovd "$@";; create-from-profile) profile_ovd "$@";; profiles) subcommand="${1:-}"; shift || true; case "${subcommand}" in list|show|validate|render|artifacts) profile_command "${subcommand}" "$@";; *) usage;; esac;; *) usage;;
 esac

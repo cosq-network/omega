@@ -46,6 +46,7 @@ OVD_PATH="$(ovd_path "${NAME}")"; CONFIG_FILE="${OVD_PATH}/config.ini"
 [ -f "${CONFIG_FILE}" ] || ovd_error "OVD '${NAME}' does not exist."
 if [ "${STORAGE_IMAGE_OVERRIDE}" = true ]; then OVD_SKIP_IMAGE_CHECK=true ovd_validate_config "${NAME}"; else ovd_validate_config "${NAME}"; fi
 ARCH="$(ovd_config_value "${CONFIG_FILE}" arch)"; RAM="$(ovd_config_value "${CONFIG_FILE}" ram)"; DISPLAY_PROFILE="$(ovd_config_value "${CONFIG_FILE}" display)"
+PROFILE_ID="$(ovd_config_value "${CONFIG_FILE}" profile_id)"
 [ -n "${STORAGE}" ] || STORAGE="$(ovd_config_value "${CONFIG_FILE}" storage)"
 [ -n "${NETWORK}" ] || NETWORK="$(ovd_config_value "${CONFIG_FILE}" network)"
 [ "${STORAGE_IMAGE_OVERRIDE}" = true ] || STORAGE_IMAGE="$(ovd_config_value "${CONFIG_FILE}" image)"
@@ -53,6 +54,18 @@ ARCH="$(ovd_config_value "${CONFIG_FILE}" arch)"; RAM="$(ovd_config_value "${CON
 ovd_validate_profile "${STORAGE}"; ovd_profile_supported "${ARCH}" "${STORAGE}" || ovd_error "Storage profile '${STORAGE}' is unavailable on ${ARCH}."
 ovd_validate_network "${NETWORK}"
 [ -z "${INITRD}" ] || [ -f "${INITRD}" ] || ovd_error "Initrd not found: ${INITRD}"
+if ovd_pid_running "${NAME}"; then ovd_error "OVD '${NAME}' is already running."; fi
+if [ -n "${PROFILE_ID}" ]; then
+    PROFILE_TOOL="${PROJECT_ROOT}/emulator/profile_catalog.py"
+    [ -f "${PROFILE_TOOL}" ] || ovd_error "Profile catalog tool is missing: ${PROFILE_TOOL}"
+    python3 "${PROFILE_TOOL}" artifacts --profile "${PROFILE_ID}" >/dev/null
+    PROFILE_IMAGE="${OVD_IMAGE_ROOT}/omega-${PROFILE_ID}-ext4.raw"
+    [ -f "${PROFILE_IMAGE}" ] || ovd_error "Resolved profile image is missing: ${PROFILE_IMAGE}"
+    PROFILE_LOCAL_IMAGE="${OVD_PATH}/$(ovd_config_value "${CONFIG_FILE}" image)"
+    if [ "${STORAGE_IMAGE_OVERRIDE}" != true ] && ! cmp -s "${PROFILE_IMAGE}" "${PROFILE_LOCAL_IMAGE}"; then
+        cp "${PROFILE_IMAGE}" "${PROFILE_LOCAL_IMAGE}"
+    fi
+fi
 if [ "${STORAGE_IMAGE_OVERRIDE}" = true ]; then STORAGE_PATH="${STORAGE_IMAGE}"; else [[ "${STORAGE_IMAGE}" != /* && "${STORAGE_IMAGE}" != *..* ]] || ovd_error "Configured storage image must remain inside the OVD directory."; STORAGE_PATH="${OVD_PATH}/${STORAGE_IMAGE}"; fi
 [ -f "${STORAGE_PATH}" ] || ovd_error "Storage image not found: ${STORAGE_PATH}"
 if [ "$(ovd_config_value "${CONFIG_FILE}" readonly)" = true ]; then READONLY=true; fi
@@ -74,7 +87,6 @@ fi
 
 STATE_DIR="$(ovd_state_dir "${NAME}")"; mkdir -p "${STATE_DIR}"
 PID_FILE="$(ovd_pid_file "${NAME}")"; LOG_FILE="$(ovd_log_file "${NAME}")"; COMMAND_FILE="$(ovd_command_file "${NAME}")"
-if ovd_pid_running "${NAME}"; then ovd_error "OVD '${NAME}' is already running."; fi
 
 QEMU_ARGS=()
 resolve_x86_display() {
@@ -90,7 +102,7 @@ add_storage() {
     [ "${READONLY}" = true ] && drive+=",readonly=on"
     case "${STORAGE}" in
         auto) QEMU_ARGS+=( -drive "file=${STORAGE_PATH},format=raw,index=0,media=disk" );;
-        virtio) QEMU_ARGS+=( -drive "${drive}" -device "$([ "${ARCH}" = x86_64 ] && echo virtio-blk-pci || echo virtio-blk-device),drive=storage0" );;
+        virtio) QEMU_ARGS+=( -drive "${drive}" -device "$([ "${ARCH}" = x86_64 ] && echo 'virtio-blk-pci,disable-modern=on' || echo virtio-blk-device),drive=storage0" );;
         ahci) QEMU_ARGS+=( -drive "file=${STORAGE_PATH},format=raw,if=ide,index=0,media=disk" );;
         usb) QEMU_ARGS+=( -drive "${drive}" -device usb-storage,drive=storage0 );;
         sd) QEMU_ARGS+=( -drive "file=${STORAGE_PATH},format=raw,if=sd,index=0,media=disk" );;

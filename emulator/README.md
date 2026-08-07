@@ -73,6 +73,58 @@ cmake -S . -B build/x86_64 \
 cmake --build build/x86_64
 ```
 
+## Real-device profile catalog
+
+The profile catalog is the declarative source for predefined device classes:
+
+```text
+emulator/profiles/catalog.json
+emulator/profiles/schema.json
+emulator/profile_catalog.py
+```
+
+List, inspect, validate, and render profiles without starting QEMU:
+
+```sh
+./emulator/ovd_manager.sh profiles list
+./emulator/ovd_manager.sh profiles list --json
+./emulator/ovd_manager.sh profiles show --profile aarch64-virt-development --json
+./emulator/ovd_manager.sh profiles validate
+./emulator/ovd_manager.sh profiles render --profile riscv64-virt-minimal
+
+# Create a native OVD from a catalog profile.
+./emulator/ovd_manager.sh create-from-profile \
+  --profile aarch64-virt-development \
+  --name arm-dev
+```
+
+Native QEMU profiles require an Omega kernel artifact and an ext4 system-image
+artifact. Resolution records the source revision and profile identity so a
+missing or stale kernel/image is rebuilt. Existing profile-backed OVDs refresh
+their local image from the verified profile artifact before launch. Use the
+dry-run operation to inspect the required artifact paths without changing the
+workspace:
+
+```sh
+./emulator/ovd_manager.sh profiles artifacts \
+  --profile aarch64-virt-development --dry-run
+```
+
+The default Omega system filesystem is ext4. FAT32 is retained only as an
+optional boot/EFI compatibility filesystem. The ext4 image builder stages the
+kernel into a temporary directory and uses `mke2fs`/`mkfs.ext4`; it is
+intentionally fail-closed until the host provides the required filesystem
+tooling and never labels a zero-filled file as a valid ext4 image.
+Android AVD and VMApple profiles are external adapters and are described by
+the catalog, but cannot be launched as generic `-M virt` OVDs.
+
+`create-from-profile` uses the profile’s catalog RAM and image-size defaults.
+If `--ram` or `--disk` is supplied, `--disk` must match the profile’s declared
+system-image size so the OVD configuration cannot disagree with its backing
+image. Use `profiles show --profile PROFILE --json` to inspect those values.
+External profiles remain inspectable, but native creation is rejected until
+their Android Emulator or VMApple adapters are available.
+
 ## OVD layout
 
 By default, OVDs are stored under `emulator/ovd/`:
@@ -383,26 +435,87 @@ archives from untrusted sources without reviewing their contents.
 
 ## GUI manager
 
-Launch the Tcl/Tk GUI:
+The GUI is a Tcl/Tk front end to `ovd_manager.sh`; the shell manager and
+profile catalog remain the source of truth. It does not maintain a separate
+device database. Every refresh reads the current OVD directories and profile
+catalog from disk.
+
+### Requirements and startup
+
+Install Tcl/Tk (`wish`) and ensure the required command-line tools are on the
+`PATH`:
+
+- `bash`, `python3`, and the Omega profile catalog files;
+- `cmake`, Clang/LLVM, and the relevant architecture toolchain for profile
+  artifact builds;
+- the architecture-specific QEMU binary for launching a device; and
+- `mke2fs` or `mkfs.ext4` for native ext4 profile-image creation.
+
+Start the executable GUI from the repository root or from another directory:
 
 ```sh
 ./emulator/ovd_gui.tcl
 ```
 
-The GUI supports:
+The GUI determines its own script directory, so it can locate
+`ovd_manager.sh`, `profile_catalog.py`, and `profiles/catalog.json` without
+requiring the current working directory to be the repository root. On a
+headless host, use the CLI and `--dry-run` options instead; the Tcl/Tk window
+requires a graphical session.
 
-- OVD creation;
-- architecture, RAM, and disk selection;
-- storage and network profile selection;
-- device listing with architecture, RAM, disk, storage, and state;
-- graphical and headless launch;
-- daemon-backed stop operations;
-- log viewing;
-- deletion with confirmation;
-- periodic state refresh.
+### Profile workflow
 
-Use the CLI for advanced options such as external images, initrds, snapshots,
-ephemeral mode, import/export, and dry-run command inspection.
+1. Open the **Predefined profile** selector. Profiles are loaded from the
+   canonical catalog and display their architecture, backend, and status.
+2. Select a native QEMU profile. The GUI fills RAM and disk fields from the
+   catalog; these values are not hardcoded GUI defaults.
+3. Enter a unique OVD name.
+4. Optionally inspect the profile or run **Check profile artifacts (dry-run)**
+   before creating the device.
+5. Select **Create from selected profile**.
+
+Native profile creation resolves the compatible kernel and ext4 system image,
+then creates an OVD containing `system.ext4` and profile metadata. The catalog
+image size is authoritative, so a disk override must match the profile image
+size. On every later launch, the launcher verifies the profile artifacts and
+refreshes the OVD-local image when the verified artifact has changed.
+
+Android AVD and VMApple entries can be inspected and checked for metadata, but
+their creation button is disabled. They require external adapters and are not
+silently converted into generic `qemu-system-aarch64 -M virt` devices.
+
+### Generic OVD workflow
+
+To create a compatibility-mode OVD instead of a catalog profile:
+
+1. Leave **Predefined profile** set to **(generic OVD)**.
+2. Enter the device name.
+3. Select the architecture, RAM, disk size, storage transport, and network
+   profile.
+4. Select **Create generic OVD**.
+
+Generic devices use the existing `userdata.img` backing image and support the
+storage transports exposed by the manager: `virtio`, `ahci`, `usb`, `sd`,
+`optical`, and `none`. Generic creation does not claim a predefined hardware
+profile or ext4 system-image contract.
+
+### Managing an OVD
+
+The device table refreshes automatically every three seconds. Select a row to
+see its profile and state, then use the management controls:
+
+- **Launch selected (GUI)** starts the device with graphical display options.
+- **Launch selected (headless)** starts with serial/headless display behavior.
+- **Stop selected** requests a normal QMP/QEMU shutdown.
+- **Validate selected** checks the OVD configuration and image path.
+- **View selected logs** displays the managed QEMU log when available.
+- **Delete selected** removes the OVD after confirmation; running devices must
+  be stopped first.
+
+The GUI intentionally does not expose every advanced lifecycle operation.
+Use the CLI for snapshots, clone, import/export, initrd selection, ephemeral
+launches, storage-image overrides, QMP options, and exact `--dry-run` command
+inspection.
 
 ## Environment isolation
 
@@ -424,6 +537,8 @@ Unit tests do not boot QEMU:
 
 ```sh
 ./emulator/test_ovd_unit.sh
+./emulator/test_profile_catalog.sh
+./emulator/test_profile_ext4_integration.sh
 tclsh emulator/test_ovd_gui.tcl
 ```
 
@@ -440,6 +555,12 @@ The OVD unit suite verifies:
 - export/import;
 - snapshot command dispatch with fake `qemu-img`;
 - cleanup behavior.
+
+The profile catalog suite additionally verifies catalog defaults, native versus
+external profile classification, deterministic rendering, ext4 artifact
+resolution, and dry-run behavior. The Tcl/Tk suite verifies GUI profile
+controls, default-field integration, external-profile guards, and manager
+actions at the script-contract level.
 
 The lifecycle suite boots real QEMU instances:
 

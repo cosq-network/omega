@@ -35,14 +35,20 @@ test test_gui_script_syntax {Verify ovd_gui.tcl syntax correctness} -body {
     set content [read $fp]
     close $fp
     # Check key procedure declarations in Tcl script
-    set has_refresh [string match "*proc refresh_device_list*" $content]
-    set has_create  [string match "*proc create_device*" $content]
-    set has_run_gui [string match "*proc run_device_gui*" $content]
-    set has_delete  [string match "*proc delete_device*" $content]
-    set has_storage [string match "*storage_combo*" $content]
-    set has_stop [string match "*proc stop_device*" $content]
-    set has_logs [string match "*proc show_device_logs*" $content]
-    expr {$has_refresh && $has_create && $has_run_gui && $has_delete && $has_storage && $has_stop && $has_logs}
+    set has_refresh [string match "*proc refresh_devices*" $content]
+    set has_create  [string match "*proc create_generic*" $content]
+    set has_run_gui [string match "*proc launch_selected*" $content]
+    set has_delete  [string match "*proc delete_selected*" $content]
+    set has_storage [string match "*.controls.storage*" $content]
+    set has_stop [string match "*proc stop_selected*" $content]
+    set has_logs [string match "*proc show_selected_logs*" $content]
+    set has_profiles [string match "*profile_catalog.py*" $content]
+    set has_create_profile [string match "*proc create_from_profile*" $content]
+    set has_artifacts [string match "*proc check_profile_artifacts*" $content]
+    set has_validate [string match "*proc validate_selected*" $content]
+    set has_defaults [string match "*default_ram*image_size*native_creation*" $content]
+    set has_external_guard [string match "*native_creation eq \"true\"*" $content]
+    expr {$has_refresh && $has_create && $has_run_gui && $has_delete && $has_storage && $has_stop && $has_logs && $has_profiles && $has_create_profile && $has_artifacts && $has_validate && $has_defaults && $has_external_guard}
 } -result {1}
 
 cleanupTests

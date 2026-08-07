@@ -20,6 +20,7 @@ public:
     static void scan();
     static uint16_t read_config_16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset);
     static uint32_t read_config_32(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset);
+    static void write_config_16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint16_t value);
 };
 
 } // namespace hal

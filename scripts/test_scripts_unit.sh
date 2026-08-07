@@ -59,6 +59,7 @@ for script in \
     "${PROJECT_ROOT}/emulator/test_ovd_unit.sh"; do
     bash -n "${script}" || fail "bash syntax: ${script}"
 done
+bash -n "${PROJECT_ROOT}/emulator/test_profile_ext4_integration.sh" || fail "bash syntax: profile ext4 integration test"
 pass "shell syntax for scripts and emulator launchers"
 
 expect_failure "run_qemu rejects unknown options" \

@@ -35,6 +35,23 @@ uint16_t PciBus::read_config_16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t 
     return static_cast<uint16_t>((val >> ((offset & 2) * 8)) & 0xFFFF);
 }
 
+void PciBus::write_config_16(uint8_t bus, uint8_t dev, uint8_t func, uint8_t offset, uint16_t value) {
+#if defined(__x86_64__)
+    uint32_t address = (static_cast<uint32_t>(bus) << 16) |
+                       (static_cast<uint32_t>(dev) << 11) |
+                       (static_cast<uint32_t>(func) << 8) |
+                       (offset & 0xFC) | 0x80000000;
+    outl(CONFIG_ADDRESS, address);
+    uint32_t current = inl(CONFIG_DATA);
+    const uint32_t shift = (offset & 2) * 8;
+    current = (current & ~(0xFFFFu << shift)) | (static_cast<uint32_t>(value) << shift);
+    outl(CONFIG_ADDRESS, address);
+    outl(CONFIG_DATA, current);
+#else
+    (void)bus; (void)dev; (void)func; (void)offset; (void)value;
+#endif
+}
+
 void PciBus::scan() {
     kernel::kprintf("[+] Scanning PCI Bus Configuration Space...\n");
     for (uint16_t bus = 0; bus < 256; ++bus) {

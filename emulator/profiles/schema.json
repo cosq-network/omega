@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://omega.invalid/ovd/profile.schema.json",
+  "title": "Omega Virtual Device profile",
+  "type": "object",
+  "required": [
+    "profile_id",
+    "profile_version",
+    "schema_version",
+    "display_name",
+    "form_factor",
+    "architecture",
+    "backend",
+    "status",
+    "qemu",
+    "memory",
+    "storage",
+    "filesystem",
+    "artifacts"
+  ],
+  "properties": {
+    "profile_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{2,127}$"},
+    "profile_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "schema_version": {"type": "integer", "minimum": 1},
+    "display_name": {"type": "string", "minLength": 1},
+    "form_factor": {"type": "string"},
+    "architecture": {"enum": ["x86_64", "aarch64", "riscv64"]},
+    "backend": {"enum": ["qemu", "qemu-vmapple", "android-avd"]},
+    "status": {"enum": ["supported", "planned", "experimental", "conditional-external", "external-adapter", "deprecated", "retired"]},
+    "qemu": {"type": "object"},
+    "memory": {"type": "object"},
+    "storage": {"type": "object"},
+    "filesystem": {"type": "object"},
+    "artifacts": {"type": "object"}
+  }
+}

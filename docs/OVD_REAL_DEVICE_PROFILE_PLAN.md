@@ -17,6 +17,25 @@ The catalog is intended to cover:
 - Android Emulator/AVD-backed device classes; and
 - conditional Apple Virtualization Framework/macOS targets.
 
+### Initial implementation status
+
+The first implementation slice is now present in the repository:
+
+- `emulator/profiles/catalog.json` is the canonical, deterministic catalog;
+- `emulator/profiles/schema.json` documents the profile contract;
+- `emulator/profile_catalog.py` validates, lists, shows, renders, and performs
+  dry-run native artifact resolution;
+- `emulator/ovd_manager.sh profiles ...` exposes the catalog operations;
+- profile-backed native OVD configuration enforces ext4 and explicit artifact
+  policy metadata; and
+- `emulator/test_profile_catalog.sh` covers all three native architectures,
+  external profile classification, deterministic rendering, and ext4 dry-run
+  behavior.
+
+The remaining implementation work is deliberately visible: add external
+Android/VMApple adapters and generate CSV/JSON/Markdown derived reports from
+the canonical catalog.
+
 The catalog must distinguish a real commercial device from the virtual board
 used to approximate it. QEMU can directly model a `q35` PC, `pc` i440FX PC,
 ARM `virt`, and RISC-V `virt`; it does not automatically reproduce the

@@ -26,10 +26,11 @@
 - **System Display Module (x86_64 Standard VGA)**: Layered display HAL with VGA text mode (80×25 at `0xB8000`), Bochs VBE linear framebuffer (1024×768×32 via DISPI), Multiboot2 framebuffer handoff, 8×16 bitmap font, and a kernel graphical console. `kprintf` output is mirrored to serial (COM1) and the active display backend concurrently.
 - **AArch64/RISC-V Display Integration**: Shared FDT walker and boot-pointer handoff, Device Tree `simple-framebuffer` HALs, pixel-format metadata, portable framebuffer console routing, and safe serial fallback. An opt-in VirtIO-GPU MMIO 2D bring-up path is included with `-DENABLE_EXPERIMENTAL_VIRTIO_GPU=ON`.
 - **Cross-Architecture Storage Foundation**: Common block requests, device lifecycle and driver registration, DMA mapping, GPT/MBR parsing, writable/read-only policy, flush/barrier handling, and a synthetic block backend verified on x86_64, AArch64, and RISC-V.
-- **Experimental VirtIO-Block Path**: Opt-in VirtIO-MMIO block discovery and read/write/flush request encoding with AArch64/RISC-V cross-build coverage. Enable with `-DENABLE_EXPERIMENTAL_VIRTIO_BLOCK=ON` while queue completion validation continues.
+- **VirtIO-Block Path**: Opt-in x86_64 transitional VirtIO-PCI discovery with legacy queue geometry, feature negotiation, and verified read/write/flush completion; AArch64/RISC-V VirtIO-MMIO remains experimental. Enable with `-DENABLE_EXPERIMENTAL_VIRTIO_BLOCK=ON`.
 - **Firmware & Bootloader Compatibility**: Compatible with **UEFI/GPT**, **U-Boot** (`bootefi` / `booti`), and **Coreboot** (TianoCore / GRUB).
 - **Multi-Format Virtual Disk Image Generator**: Generates RAW (`.img`), QCOW2 (`.qcow2`), VMDK (`.vmdk`), and VDI (`.vdi`) disk images with embedded FAT32 payloads (`/EFI/BOOT/` and `/boot/omega.elf`).
-- **Omega Virtual Device (OVD) Manager & GUI**: Android-like multi-architecture device manager with schema validation, safe lifecycle commands, daemon logs/QMP state, snapshots, import/export, networking/initrd/ephemeral profiles, selectable storage transports, and Tcl/Tk status/log controls.
+- **Omega Virtual Device (OVD) Manager & GUI**: Android-like multi-architecture device manager with schema validation, predefined real-device profiles, ext4 artifact checks, safe lifecycle commands, daemon logs/QMP state, snapshots, import/export, networking/initrd/ephemeral profiles, selectable storage transports, and Tcl/Tk profile-aware management.
+- **OVD Real-Device Profile Catalog**: Versioned x86_64, AArch64, and RISC-V profile definitions with deterministic validation/rendering, ext4-default native artifact policy, and explicit Android AVD/VMApple external-adapter classification.
 - **Containerization & CI/CD**: Minimal Alpine-based `Dockerfile`, VSCode DevContainers/Codespaces (`.devcontainer/devcontainer.json`), and GitHub Actions CI/CD (`.github/workflows/ci.yml`).
 
 ---
@@ -111,14 +112,19 @@ omega/
 │   ├── VGA_DISPLAY_PLAN.md        # SDM — x86_64 Standard VGA (Phase 7.2)
 │   ├── DISPLAY_AARCH64_RISCV_PLAN.md  # SDM — AArch64/RISC-V extension (Phase 7.2b)
 │   ├── STORAGE_ARCHITECTURE_PLAN.md   # Cross-architecture storage architecture
+│   ├── OVD_REAL_DEVICE_PROFILE_PLAN.md # OVD profile registry and artifact plan
 │   └── COMPLETION_REPORT.md       # Final Verification Report
 ├── emulator/
-│   ├── README.md                  # OVD manager, storage profiles, and tests
+│   ├── README.md                  # OVD manager, profiles, GUI, and tests
+│   ├── profiles/                  # Canonical predefined OVD profile catalog
+│   ├── profile_catalog.py         # Profile validation, rendering, artifacts
 │   ├── libovd.sh                   # Shared OVD validation and lifecycle helpers
 │   ├── ovd_gui.tcl                # Tcl/Tk Omega Virtual Device Manager GUI
 │   ├── ovd_manager.sh             # OVD manager, lifecycle, import/export, snapshots
 │   ├── ovd_run.sh                 # OVD Launcher (display + storage profiles)
 │   ├── test_ovd_unit.sh           # OVD config and dry-run command unit tests
+│   ├── test_profile_catalog.sh     # Profile catalog and artifact dry-run tests
+│   ├── test_profile_ext4_integration.sh # Profile-backed ext4 integration
 │   ├── test_ovd.sh                # OVD lifecycle, storage transport, and boot tests
 │   └── test_ovd_gui.tcl           # Tcl/Tk GUI Unit Test Suite
 ├── scripts/
@@ -178,17 +184,37 @@ docker run -it --rm -v $(pwd):/workspace omega-dev
 ```bash
 ./emulator/ovd_gui.tcl
 
-# Or launch from CLI (x86_64 includes Standard VGA):
+# Or create a generic OVD from the CLI:
 ./emulator/ovd_manager.sh create --name <device> --arch x86_64 --storage virtio
 ./emulator/ovd_run.sh run --name <device> --gpu --storage virtio
 ./emulator/ovd_run.sh run --name <device> --no-gpu --storage virtio
 ./emulator/ovd_run.sh run --name <device> --no-gpu --storage usb --dry-run
+
+# Or create a native OVD from the predefined profile catalog:
+./emulator/ovd_manager.sh profiles list
+./emulator/ovd_manager.sh profiles show --profile aarch64-virt-development --json
+./emulator/ovd_manager.sh create-from-profile \
+  --profile aarch64-virt-development --name arm-dev
 ```
 
 OVD storage profiles are selectable at launch: `virtio`, `ahci`, `usb`,
 `sd`, `optical`, or `none`. The profile controls the QEMU transport and
-device model while the shared `userdata.img` remains the backing image.
-Use `--dry-run` to inspect the generated command without starting QEMU.
+device model for generic OVDs. Generic instances use `userdata.img`; native
+catalog profiles use a verified ext4 `system.ext4` image and resolve the
+latest compatible Omega kernel before launch. Existing profile-backed OVDs
+refresh their local image when the verified profile artifact changes.
+Use `profiles artifacts --profile PROFILE --dry-run` to inspect artifact
+resolution without modifying the workspace.
+
+The GUI supports profile discovery, catalog-default RAM/disk values, profile
+inspection, ext4 artifact checks, profile-backed creation, generic creation,
+launch, stop, validation, logs, and deletion. Android AVD and VMApple profiles
+are inspectable external-adapter profiles and cannot currently be created as
+native OVDs.
+
+The default Omega system filesystem is ext4. FAT32 is reserved for optional
+boot/EFI compatibility use. Ext4 image creation requires `mke2fs` or
+`mkfs.ext4` and fails closed rather than producing an invalid placeholder.
 For the complete OVD lifecycle, snapshot, import/export, networking, initrd,
 QMP, and GUI guide, see [`emulator/README.md`](emulator/README.md).
 
@@ -202,6 +228,8 @@ QMP, and GUI guide, see [`emulator/README.md`](emulator/README.md).
 ./scripts/test_scripts_unit.sh # Shell-script and dry-run launcher unit tests
 ./scripts/test_disk_images.sh   # Bootable disk image tests
 ./emulator/test_ovd_unit.sh     # OVD configuration and storage profile unit tests
+./emulator/test_profile_catalog.sh # Profile catalog, defaults, and artifact tests
+./emulator/test_profile_ext4_integration.sh # Profile-backed ext4 image/OVD test
 ./emulator/test_ovd.sh          # OVD lifecycle, storage profiles, and display verification
 tclsh emulator/test_ovd_gui.tcl # OVD Tcl/Tk GUI unit tests
 ```

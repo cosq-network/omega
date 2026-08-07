@@ -149,6 +149,8 @@ bash "${PROJECT_ROOT}/scripts/test_storage.sh"
 echo -e "\n[*] Running OVD storage transport and lifecycle test suite..."
 bash "${PROJECT_ROOT}/scripts/test_scripts_unit.sh"
 bash "${PROJECT_ROOT}/emulator/test_ovd_unit.sh"
+bash "${PROJECT_ROOT}/emulator/test_profile_catalog.sh"
+bash "${PROJECT_ROOT}/emulator/test_profile_ext4_integration.sh"
 bash "${PROJECT_ROOT}/emulator/test_ovd.sh"
 
 echo -e "\n${GREEN}=================================================${NC}"

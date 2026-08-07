@@ -24,11 +24,23 @@ the toolchain files in `cmake/` and target `x86_64`, `aarch64`, and `riscv64`.
 | `test_display.sh` | x86_64 Bochs VBE and VGA text-mode matrix | Build output and temporary QEMU logs |
 | `test_display_aarch64.sh` | AArch64 display HAL and serial fallback smoke test | Build output and temporary QEMU logs |
 | `test_storage_unit.sh` | Host-side storage API, write-policy, and partition parser unit tests | `build/storage-tests/` |
-| `test_storage.sh` | Storage unit tests, all-ISA boot tests, and experimental VirtIO-Block builds | Build output and temporary QEMU logs |
+| `test_storage.sh` | Storage unit tests, all-ISA boot tests, x86_64 transitional VirtIO-Block runtime completion, and AArch64/RISC-V VirtIO-Block builds | Build output and temporary QEMU logs |
 | `test_scripts_unit.sh` | Shell syntax, argument validation, dry-run launchers, and script contracts | Temporary files only |
+| `../emulator/test_profile_catalog.sh` | Profile schema/catalog validation, deterministic rendering, and ext4 artifact dry-run checks | Temporary files only |
+| `../emulator/test_profile_ext4_integration.sh` | Profile-backed kernel/image manifest, ext4 image, OVD copy, and launcher integration checks | Temporary build/image/OVD roots |
 
 These scripts are stateless by design. Named device lifecycle, snapshots,
 QMP state, and GUI controls are provided by [`../emulator/README.md`](../emulator/README.md).
+
+The profile catalog is tested independently with:
+
+```sh
+./emulator/test_profile_catalog.sh
+```
+
+It does not require QEMU or filesystem-image tooling. Native profile artifact
+dry-runs report the latest-kernel path, matching manifest, ext4 image path, and
+required host tools without creating placeholder images.
 
 ## QEMU launcher
 
@@ -117,10 +129,24 @@ device, including:
 - device registration, lookup, and removal state.
 
 The integration suite boots x86_64, AArch64, and RISC-V kernels in QEMU and
-checks the storage-core pass markers. It also cross-builds the opt-in
-VirtIO-Block configuration for AArch64 and RISC-V. The default kernels use
-the safe synthetic backend; the concrete NVMe, AHCI, SDHCI, USB MSC, ATAPI,
-and filesystem drivers remain planned milestones.
+checks the storage-core pass markers. It additionally boots an x86_64 QEMU PC
+with a transitional `virtio-blk-pci` device and asserts read, write/read, and
+flush completion markers. The opt-in VirtIO-Block configuration is still
+cross-built for AArch64 and RISC-V; their MMIO runtime completion remains
+experimental. The concrete NVMe, AHCI, SDHCI, USB MSC, ATAPI, and filesystem
+drivers remain planned milestones.
+
+Profile-backed ext4 integration is run independently with:
+
+```sh
+./emulator/test_profile_ext4_integration.sh
+```
+
+It always validates the artifact dry-run contract. If `mke2fs` or `mkfs.ext4`
+is installed, it also builds the current-kernel ext4 image, creates an OVD from
+the x86_64 profile, verifies the manifest/copy, and checks the generated QEMU
+command. Without either tool it reports an explicit skip rather than creating
+an invalid placeholder image.
 
 QEMU test processes are tracked and cleaned up on exit. The tests reuse build
 directories instead of deleting them, making them safer for local development

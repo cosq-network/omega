@@ -33,14 +33,18 @@ qemu-system-x86_64 \
 ```bash
 ./scripts/test_display.sh    # Bochs VBE, -device VGA, -vga none fallback
 ./scripts/test.sh            # Full multi-arch suite (includes display tests)
-./scripts/test_storage.sh    # Storage unit tests and all-ISA QEMU storage-core tests
+./scripts/test_storage.sh    # Storage unit tests, all-ISA tests, and x86 VirtIO-Block completion
+./emulator/test_profile_catalog.sh # OVD profile/default/artifact tests
+./emulator/test_profile_ext4_integration.sh # Profile-backed ext4 integration (tool-aware)
+tclsh emulator/test_ovd_gui.tcl    # Tcl/Tk GUI contract tests
 ```
 
 ---
 
 ## AArch64 Emulation
 
-Display is **not yet implemented** (Phase 7.2b). Serial console only today. See `docs/DISPLAY_AARCH64_RISCV_PLAN.md`.
+SimpleFb display integration and serial fallback are implemented; VirtIO-GPU
+remains experimental. See `docs/DISPLAY_AARCH64_RISCV_PLAN.md`.
 
 ```bash
 # Build
@@ -51,15 +55,15 @@ cmake -DCMAKE_TOOLCHAIN_FILE=../../cmake/aarch64-toolchain.cmake -DARCH=aarch64 
 qemu-system-aarch64 -M virt -cpu cortex-a57 -nographic -kernel build/aarch64/omega.elf
 ```
 
-**Planned (Phase 7.2b) — SimpleFb via Device Tree:**
+**SimpleFb via Device Tree:**
 
 ```bash
 qemu-system-aarch64 -M virt -cpu cortex-a57 -nographic \
   -kernel build/aarch64/omega.elf
-# Expected future marker: [+] Display: SimpleFb 1024x768x32
+# Expected marker: Display console write path
 ```
 
-**Planned (Phase 7.2b) — VirtIO-GPU with GUI:**
+**Experimental — VirtIO-GPU with GUI:**
 
 ```bash
 qemu-system-aarch64 -M virt -cpu cortex-a57 \
@@ -67,14 +71,16 @@ qemu-system-aarch64 -M virt -cpu cortex-a57 \
   -serial stdio \
   -device virtio-gpu-pci \
   -display sdl
-# Expected future marker: [+] Display: VirtioGpu
+# The guarded VirtIO-GPU path may fall back to serial output.
 ```
 
 ---
 
 ## RISC-V 64 Emulation
 
-Display is **not yet implemented** (Phase 7.2b). OpenSBI firmware loads; kernel `main` handoff is still being completed. See `docs/DISPLAY_AARCH64_RISCV_PLAN.md`.
+SimpleFb display integration, serial fallback, and OpenSBI-to-kernel handoff
+are implemented; VirtIO-GPU remains experimental. See
+`docs/DISPLAY_AARCH64_RISCV_PLAN.md`.
 
 ```bash
 # Build
@@ -86,7 +92,9 @@ qemu-system-riscv64 -M virt -cpu rv64 -bios default -nographic \
   -kernel build/riscv64/omega.elf
 ```
 
-**Planned (Phase 7.2b):** Same SimpleFb and VirtIO-GPU paths as AArch64 once DT pointer capture and kernel boot are fixed.
+**Current status:** The same SimpleFb and guarded VirtIO-GPU paths are
+available as AArch64; QEMU framebuffer behavior still depends on the supplied
+machine/device-tree configuration.
 
 ---
 
@@ -98,7 +106,7 @@ qemu-system-riscv64 -M virt -cpu rv64 -bios default -nographic \
 ./emulator/ovd_run.sh run --name phone --gpu       # GUI window
 ./emulator/ovd_run.sh run --name phone --no-gpu    # headless Bochs VBE
 
-# AArch64 / RISC-V — serial only today; VirtIO-GPU planned for --gpu
+# AArch64 / RISC-V — SimpleFb/serial fallback; guarded VirtIO-GPU for --gpu
 ./emulator/ovd_manager.sh create --name tablet --arch aarch64 --ram 512 --disk 32
 ./emulator/ovd_run.sh run --name tablet --no-gpu
 ```
@@ -114,10 +122,47 @@ OVD storage profiles select the QEMU transport for `userdata.img`:
 ./emulator/ovd_run.sh run --name phone --storage none
 ```
 
-New OVDs default to `virtio`: x86_64 uses `virtio-blk-pci`, while AArch64 and
+New OVDs default to `virtio`: x86_64 uses transitional `virtio-blk-pci` with
+legacy queue completion validation, while AArch64 and
 RISC-V use `virtio-blk-device`. `--dry-run` prints the generated QEMU command
 without launching it. This emulator wiring is independent of the kernel
-VirtIO-Block driver, which remains opt-in during validation.
+VirtIO-Block driver; x86_64 runtime validation enables it explicitly, while
+the AArch64/RISC-V MMIO driver remains opt-in during validation.
+
+### Profile-based OVDs
+
+Predefined device profiles are stored in `emulator/profiles/catalog.json` and
+managed through the same CLI and GUI:
+
+```bash
+./emulator/ovd_manager.sh profiles list
+./emulator/ovd_manager.sh profiles validate
+./emulator/ovd_manager.sh profiles show \
+  --profile aarch64-virt-development --json
+./emulator/ovd_manager.sh profiles render \
+  --profile riscv64-virt-minimal
+./emulator/ovd_manager.sh profiles artifacts \
+  --profile aarch64-virt-development --dry-run
+./emulator/ovd_manager.sh create-from-profile \
+  --profile aarch64-virt-development --name arm-dev
+```
+
+Native profiles resolve the latest compatible `omega.elf` and matching ext4
+system image. Existing profile-backed OVDs refresh their local `system.ext4`
+when the verified artifact changes. Profile catalog image size is authoritative
+and disk overrides must match it. Ext4 creation requires `mke2fs` or
+`mkfs.ext4` and fails closed when unavailable.
+
+Launch the profile-aware Tcl/Tk manager with:
+
+```bash
+./emulator/ovd_gui.tcl
+```
+
+The GUI uses catalog RAM/disk defaults, supports profile inspection and
+artifact checks, creates native profiles, manages generic OVDs, and controls
+launch, stop, validation, logs, and deletion. Android AVD and VMApple entries
+are external-adapter profiles and cannot currently be created as native OVDs.
 
 ## Storage Architecture
 

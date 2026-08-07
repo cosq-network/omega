@@ -36,12 +36,40 @@ run_and_assert() {
     grep -Fq "System online. Entering idle loop" "${log}"
     echo "[PASS] ${arch} storage core integration"
 }
+run_x86_virtio_completion() {
+    local build_dir="${BUILD_DIR}/x86_64-virtio-block-test"
+    local image="${build_dir}/profile-runtime.raw"
+    local log="${BUILD_DIR}/x86_64_virtio_block_runtime.log"
+    cmake -S "${PROJECT_ROOT}" -B "${build_dir}" \
+        -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/x86_64-toolchain.cmake" \
+        -DARCH=x86_64 -DENABLE_EXPERIMENTAL_VIRTIO_BLOCK=ON >/dev/null
+    cmake --build "${build_dir}" >/dev/null
+    mkdir -p "${build_dir}"
+    dd if=/dev/zero of="${image}" bs=1M count=16 status=none
+    qemu-system-x86_64 -machine pc -no-reboot -display none -vga std -serial stdio \
+        -kernel "${build_dir}/omega.elf" \
+        -drive "file=${image},format=raw,if=none,id=storage0" \
+        -device virtio-blk-pci,disable-modern=on,drive=storage0 >"${log}" 2>&1 &
+    local qemu_pid=$!
+    QEMU_PIDS+=("${qemu_pid}")
+    sleep 4
+    kill -9 "${qemu_pid}" 2>/dev/null || true
+    for marker in \
+        "[+] VirtIO-Block PCI runtime completion enabled." \
+        "[TEST][PASS] VirtIO-Block read completion" \
+        "[TEST][PASS] VirtIO-Block write/read completion" \
+        "[TEST][PASS] VirtIO-Block flush completion"; do
+        grep -Fq "${marker}" "${log}" || { cat "${log}"; echo "[FAIL] x86_64 VirtIO-Block runtime: ${marker}" >&2; return 1; }
+    done
+    echo "[PASS] x86_64 VirtIO-Block runtime completion"
+}
 build_arch x86_64 x86_64-toolchain.cmake
 build_arch aarch64 aarch64-toolchain.cmake
 build_arch riscv64 riscv64-toolchain.cmake
 run_and_assert x86_64
 run_and_assert aarch64
 run_and_assert riscv64
+run_x86_virtio_completion
 for arch in aarch64 riscv64; do
     cmake -S "${PROJECT_ROOT}" -B "${BUILD_DIR}/${arch}-virtio-block-test" \
         -DCMAKE_TOOLCHAIN_FILE="${PROJECT_ROOT}/cmake/${arch}-toolchain.cmake" \
