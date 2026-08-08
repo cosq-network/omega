@@ -1,10 +1,22 @@
 # Omega Kernel
 
+## Overview
+
 **Omega** is a lightweight, high-performance, freestanding C++ Unix-like microkernel core designed to cross-compile using Clang and LLVM (`ld.lld`) for **x86_64** (x64), **AArch64** (ARM64), and **RISC-V 64 (`rv64gc`)** target architectures.
 
 ---
 
-## 🌟 Key Features & Subsystem Overview
+## Contents
+
+- [Overview](#overview)
+- [Key Features](#key-features)
+- [Technical Implementation](#technical-implementation)
+- [Repository Structure](#repository-structure)
+- [Building and Running](#building-and-running)
+- [Automated Tests](#automated-tests)
+- [License](#license)
+
+## Key Features
 
 - **Clang/LLVM Cross-Compilation**: Built using `clang++`, `ld.lld`, and CMake toolchain integration without external GCC cross-compiler dependencies.
 - **Triple Architecture Support**:
@@ -38,9 +50,9 @@
 
 ---
 
-## ⚙️ Detailed Technical Implementation Specifications
+## Technical Implementation
 
-### 1. Bootstrapping & Architectural Handover
+### Bootstrapping and Architectural Handover
 - **x86_64 (`kernel/arch/x86_64/boot.s`)**:
   - Entry point `_start` identity-maps initial 1 GB physical memory using 2 MB Huge Pages. Enables PAE, activates Long Mode via `EFER` MSR, loads GDT, and jumps to `kernel_main()`.
   - Includes a Xen PVH ELF Note (`.xen_note` section with `PT_NOTE` program header) to enable QEMU direct `-kernel` loading.
@@ -49,7 +61,7 @@
 - **RISC-V 64 (`kernel/arch/riscv64/boot.s` & `trap.s`)**:
   - Supervisor Mode entry loaded at `0x80200000` above OpenSBI firmware. Clears `sstatus.SIE`, initializes `stvec` supervisor trap vector, sets up 16 KiB boot stack pointer, and branches to `kernel_main()`.
 
-### 2. System Display Module
+### System Display Module
 
 | Document | Architecture | Phase | Status |
 | :--- | :--- | :--- | :--- |
@@ -92,7 +104,7 @@ isolated with `OMEGA_BUILD_ROOT` and `OMEGA_IMAGE_ROOT`.
 
 ---
 
-## 📁 Repository Directory Structure
+## Repository Structure
 
 ```text
 omega/
@@ -153,12 +165,12 @@ omega/
     │   └── riscv64/               # Boot, trap, uart, plic, pci, SimpleFb display, linker.ld
     ├── include/                   # Kernel HAL & subsystem headers (display, console, storage, DMA)
     ├── init/main.cpp              # Kernel entry point
-    └── sys/                       # PMM, VMM, heap, scheduler, syscall, VFS, storage, display_console, …
+    └── sys/                       # PMM, VMM, heap, scheduler, syscall, VFS, storage, display_console, and more
 ```
 
 ---
 
-## 🚀 Building and Running
+## Building and Running
 
 ### 1. Build Kernel Binaries (x86_64, AArch64, RISC-V 64)
 ```bash
@@ -245,7 +257,7 @@ boot/EFI compatibility use. Ext4 image creation requires `mke2fs` or
 For the complete OVD lifecycle, snapshot, import/export, networking, initrd,
 QMP, and GUI guide, see [`emulator/README.md`](emulator/README.md).
 
-### 5. Run Automated Test Suites
+### Automated Test Suites
 ```bash
 ./scripts/test.sh               # Multi-arch integration tests (includes test_display.sh)
 ./scripts/test_display.sh     # VGA display matrix: Bochs VBE, VgaText fallback, self-tests
@@ -278,5 +290,5 @@ python3 scripts/test_scripts_unit.py
 
 ---
 
-## 📜 License
+## License
 This project is open-source under the MIT License.
