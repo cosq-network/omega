@@ -18,6 +18,7 @@
 #include "kernel/fdt.hpp"
 #include "kernel/storage.hpp"
 #include "kernel/virtio_blk.hpp"
+#include "kernel/ext4.hpp"
 
 // Static Heap Allocation Buffer (1 MB) to guarantee physical memory availability across architectures
 static uint8_t kernel_heap_buffer[1024 * 1024] __attribute__((aligned(8)));
@@ -136,6 +137,9 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
 
     // Initialize Virtual Filesystem (VFS)
     vfs::VirtualFilesystem::init();
+    if (ext4::mount(storage::Manager::find_by_name("virtio0"), nullptr) == storage::Status::Success) {
+        kernel::kprintf("[TEST][PASS] ext4 root filesystem mounted\n");
+    }
 
     // Initialize Initrd RAM Disk at 0x600000
     initrd::Initrd::init(0x600000);

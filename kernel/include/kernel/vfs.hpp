@@ -19,12 +19,14 @@ struct VfsNode {
     int (*read)(VfsNode* node, size_t offset, size_t size, uint8_t* buffer);
     int (*write)(VfsNode* node, size_t offset, size_t size, const uint8_t* buffer);
     VfsNode* (*finddir)(VfsNode* node, const char* name);
+    void* fs_data;
 };
 
 class VirtualFilesystem {
 public:
     static void init();
     static VfsNode* get_root();
+    static void mount_root(VfsNode* node);
     static int read(VfsNode* node, size_t offset, size_t size, uint8_t* buffer);
     static int write(VfsNode* node, size_t offset, size_t size, const uint8_t* buffer);
     static VfsNode* open(const char* path);

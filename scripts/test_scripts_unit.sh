@@ -50,6 +50,7 @@ for script in \
     "${PROJECT_ROOT}/scripts/test_display_aarch64.sh" \
     "${PROJECT_ROOT}/scripts/test_storage.sh" \
     "${PROJECT_ROOT}/scripts/test_storage_unit.sh" \
+    "${PROJECT_ROOT}/scripts/test_ext4_unit.sh" \
     "${PROJECT_ROOT}/scripts/create_bootable_disk.sh" \
     "${PROJECT_ROOT}/scripts/test_disk_images.sh" \
     "${PROJECT_ROOT}/emulator/libovd.sh" \

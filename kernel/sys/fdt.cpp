@@ -12,8 +12,11 @@ static uint64_t cells(const uint8_t* p, uint32_t count) {
 }
 static size_t length(const char* s) { size_t n = 0; while (s[n]) ++n; return n; }
 static bool equal(const char* a, const char* b) {
-    const size_t n = length(a); if (n != length(b)) return false;
-    for (size_t i = 0; i < n; ++i) if (a[i] != b[i]) return false; return true;
+    for (size_t i = 0; i < 256; ++i) {
+        if (a[i] != b[i]) return false;
+        if (!a[i]) return true;
+    }
+    return false;
 }
 static bool has_compatible(const char* s, uint32_t n, const char* wanted) {
     const uint32_t wanted_len = static_cast<uint32_t>(length(wanted));
@@ -46,7 +49,8 @@ bool find_simple_framebuffer(SimpleFramebuffer* out) {
     const uint8_t* structure = base + struct_off; const char* strings = reinterpret_cast<const char*>(base + strings_off);
     struct Node { bool candidate, reg, width, height, stride, fmt; SimpleFramebuffer fb; };
     Node stack[16]{}; uint32_t depth=0, address_cells=2, size_cells=1, off=0;
-    while (off + 4 <= struct_size) {
+    uint32_t tokens = 0;
+    while (off + 4 <= struct_size && tokens++ < 65536) {
         const uint32_t token=be32(structure+off); off+=4;
         if (token==1) {
             if (depth>=16) return false; Node node{}; const char* name=reinterpret_cast<const char*>(structure+off); size_t n=0;
@@ -84,7 +88,8 @@ bool find_virtio_mmio(VirtioMmioDevice* out, uint32_t ordinal) {
     const uint8_t* structure = base + struct_off; const char* strings = reinterpret_cast<const char*>(base + strings_off);
     struct Node { bool candidate, reg; VirtioMmioDevice device; };
     Node stack[16]{}; uint32_t depth=0, address_cells=2, size_cells=1, off=0, found=0;
-    while (off + 4 <= struct_size) {
+    uint32_t tokens = 0;
+    while (off + 4 <= struct_size && tokens++ < 65536) {
         const uint32_t token=be32(structure+off); off+=4;
         if (token==1) {
             if (depth>=16) return false; Node node{}; const char* name=reinterpret_cast<const char*>(structure+off); size_t n=0;

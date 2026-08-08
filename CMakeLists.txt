@@ -42,6 +42,7 @@ set(KERNEL_SOURCES
     kernel/sys/scheduler.cpp
     kernel/sys/syscall.cpp
     kernel/sys/vfs.cpp
+    kernel/sys/ext4.cpp
     kernel/sys/initrd.cpp
     kernel/sys/dma.cpp
     kernel/sys/storage.cpp

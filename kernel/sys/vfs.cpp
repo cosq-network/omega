@@ -16,6 +16,7 @@ void VirtualFilesystem::init() {
     root_node->read = nullptr;
     root_node->write = nullptr;
     root_node->finddir = nullptr;
+    root_node->fs_data = nullptr;
 
     kernel::kprintf("[+] Virtual Filesystem (VFS) Initialized.\n");
     kernel::kprintf("    Root Node '/' Mounted.\n");
@@ -23,6 +24,10 @@ void VirtualFilesystem::init() {
 
 VfsNode* VirtualFilesystem::get_root() {
     return root_node;
+}
+
+void VirtualFilesystem::mount_root(VfsNode* node) {
+    if (node) root_node = node;
 }
 
 int VirtualFilesystem::read(VfsNode* node, size_t offset, size_t size, uint8_t* buffer) {
@@ -40,10 +45,24 @@ int VirtualFilesystem::write(VfsNode* node, size_t offset, size_t size, const ui
 }
 
 VfsNode* VirtualFilesystem::open(const char* path) {
-    if (path && path[0] == '/' && path[1] == '\0') {
-        return root_node;
+    if (!path || path[0] != '/' || !root_node) return nullptr;
+    VfsNode* current = root_node;
+    size_t pos = 1;
+    while (path[pos]) {
+        while (path[pos] == '/') ++pos;
+        if (!path[pos]) break;
+        char component[64]{};
+        size_t length = 0;
+        while (path[pos] && path[pos] != '/') {
+            if (length + 1 >= sizeof(component)) return nullptr;
+            component[length++] = path[pos++];
+        }
+        component[length] = '\0';
+        if (!current->finddir) return nullptr;
+        current = current->finddir(current, component);
+        if (!current) return nullptr;
     }
-    return nullptr;
+    return current;
 }
 
 } // namespace vfs

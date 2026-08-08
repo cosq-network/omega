@@ -145,6 +145,7 @@ bash "${PROJECT_ROOT}/scripts/test_display_aarch64.sh"
 
 echo -e "\n[*] Running storage unit and integration test suite..."
 bash "${PROJECT_ROOT}/scripts/test_storage.sh"
+bash "${PROJECT_ROOT}/scripts/test_ext4_unit.sh"
 
 echo -e "\n[*] Running OVD storage transport and lifecycle test suite..."
 bash "${PROJECT_ROOT}/scripts/test_scripts_unit.sh"

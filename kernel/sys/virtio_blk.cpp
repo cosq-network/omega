@@ -17,9 +17,11 @@ static constexpr uint32_t DEVICE_FEATURES = 0x010;
 static constexpr uint32_t DEVICE_FEATURES_SEL = 0x014;
 static constexpr uint32_t DRIVER_FEATURES = 0x020;
 static constexpr uint32_t DRIVER_FEATURES_SEL = 0x024;
+static constexpr uint32_t GUEST_PAGE_SIZE = 0x028;
 static constexpr uint32_t QUEUE_SEL = 0x030;
 static constexpr uint32_t QUEUE_NUM_MAX = 0x034;
 static constexpr uint32_t QUEUE_NUM = 0x038;
+static constexpr uint32_t QUEUE_ALIGN = 0x03C;
 static constexpr uint32_t QUEUE_PFN = 0x040;
 static constexpr uint32_t QUEUE_READY = 0x044;
 static constexpr uint32_t QUEUE_NOTIFY = 0x050;
@@ -44,42 +46,44 @@ static constexpr uint32_t TYPE_FLUSH = 4;
 static constexpr uint32_t FEATURE_RO = 5;
 static constexpr uint32_t FEATURE_FLUSH = 9;
 static constexpr uint32_t FEATURE_FUA = 11;
-// Transitional VirtIO-PCI does not provide a writable queue-size register;
-// the legacy driver must use the complete advertised queue. QEMU's standard
-// PC/Q35 virtio-blk device currently advertises 256 entries. Keeping the
-// backing ring at that geometry also places the legacy used ring on the next
-// required page boundary.
-static constexpr uint32_t QUEUE_CAPACITY = 256;
+// Keep enough storage for the largest queue exposed by QEMU virtio-mmio on
+// the virt machine. Legacy transports use the device's complete advertised
+// queue; the actual ring offsets are calculated from the selected queue size.
+static constexpr uint32_t QUEUE_CAPACITY = 1024;
 
 struct Descriptor { uint64_t address; uint32_t length; uint16_t flags; uint16_t next; };
 struct UsedElement { uint32_t id; uint32_t length; };
-struct Queue {
-    alignas(16) Descriptor descriptors[QUEUE_CAPACITY];
-    uint16_t avail_flags;
-    uint16_t avail_index;
-    uint16_t avail_ring[QUEUE_CAPACITY];
-    uint16_t avail_event;
-    uint16_t used_flags;
-    uint16_t used_index;
-    UsedElement used_ring[QUEUE_CAPACITY];
-    uint16_t used_event;
-};
-struct LegacyQueue {
-    Queue modern;
-    uint8_t padding[8192 - sizeof(Queue)];
-    uint16_t legacy_used_flags;
-    uint16_t legacy_used_index;
-    UsedElement legacy_used_ring[QUEUE_CAPACITY];
-    uint16_t legacy_used_event;
-};
 struct RequestHeader { uint32_t type; uint32_t reserved; uint64_t sector; };
+struct Ring {
+    Descriptor* descriptors;
+    volatile uint16_t* avail_index;
+    volatile uint16_t* avail_ring;
+    volatile uint16_t* used_index;
+    UsedElement* used_ring;
+    uintptr_t descriptors_address;
+    uintptr_t driver_address;
+    uintptr_t device_address;
+};
+
+static constexpr size_t queue_avail_bytes(uint32_t entries) {
+    return sizeof(uint16_t) * (2u + entries + 1u);
+}
+static constexpr size_t queue_used_bytes(uint32_t entries) {
+    return sizeof(uint16_t) * 2u + sizeof(UsedElement) * entries + sizeof(uint16_t);
+}
+static constexpr size_t queue_used_offset(uint32_t entries) {
+    const size_t end = sizeof(Descriptor) * entries + queue_avail_bytes(entries);
+    return (end + 4095u) & ~static_cast<size_t>(4095u);
+}
+static constexpr size_t QUEUE_STORAGE_SIZE = queue_used_offset(QUEUE_CAPACITY) + queue_used_bytes(QUEUE_CAPACITY);
 
 struct Context {
     uintptr_t base;
     bool legacy_pci;
     uint32_t version;
     uint32_t queue_size;
-    alignas(4096) LegacyQueue queue;
+    alignas(4096) uint8_t queue_storage[QUEUE_STORAGE_SIZE];
+    Ring ring;
     uint64_t capacity;
     uint32_t block_size;
     bool active;
@@ -129,7 +133,7 @@ static uint8_t read_status() {
         return value;
     }
 #endif
-    return *reinterpret_cast<volatile uint8_t*>(context.base + STATUS);
+    return static_cast<uint8_t>(*reinterpret_cast<volatile uint32_t*>(context.base + STATUS));
 }
 [[maybe_unused]] static uint32_t transport_offset(uint32_t offset) {
 #if defined(__x86_64__)
@@ -151,11 +155,10 @@ static void write_status(uint8_t value) {
         return;
     }
 #endif
-    *reinterpret_cast<volatile uint8_t*>(context.base + STATUS) = value;
+    *reinterpret_cast<volatile uint32_t*>(context.base + STATUS) = value;
 }
 static uint16_t used_index() {
-    if (context.version == 1) return *reinterpret_cast<volatile uint16_t*>(&context.queue.legacy_used_index);
-    return *reinterpret_cast<volatile uint16_t*>(&context.queue.modern.used_index);
+    return *context.ring.used_index;
 }
 static void barrier() {
 #if defined(__aarch64__)
@@ -173,22 +176,34 @@ static bool setup_queue() {
     if (maximum < 3) return false;
     if (context.version == 1 && maximum > QUEUE_CAPACITY) return false;
     context.queue_size = context.version == 1 ? maximum : (maximum < QUEUE_CAPACITY ? maximum : QUEUE_CAPACITY);
-    for (size_t i = 0; i < sizeof(context.queue); ++i) reinterpret_cast<uint8_t*>(&context.queue)[i] = 0;
-    // Legacy PCI exposes queue size as read-only; modern MMIO requires the
-    // negotiated queue size to be written explicitly.
-    if (context.version != 1) write_reg(QUEUE_NUM, context.queue_size);
-    const uintptr_t queue_address = reinterpret_cast<uintptr_t>(&context.queue);
+    for (size_t i = 0; i < sizeof(context.queue_storage); ++i) context.queue_storage[i] = 0;
+    const uintptr_t queue_address = reinterpret_cast<uintptr_t>(context.queue_storage);
+    const uintptr_t avail_address = queue_address + sizeof(Descriptor) * context.queue_size;
+    const uintptr_t used_address = queue_address + queue_used_offset(context.queue_size);
+    context.ring.descriptors = reinterpret_cast<Descriptor*>(queue_address);
+    context.ring.avail_index = reinterpret_cast<volatile uint16_t*>(avail_address + sizeof(uint16_t));
+    context.ring.avail_ring = reinterpret_cast<volatile uint16_t*>(avail_address + sizeof(uint16_t) * 2u);
+    context.ring.descriptors_address = queue_address;
+    context.ring.driver_address = avail_address;
+    context.ring.device_address = context.version == 1 ? used_address : used_address;
+    context.ring.used_index = reinterpret_cast<volatile uint16_t*>(used_address + sizeof(uint16_t));
+    context.ring.used_ring = reinterpret_cast<UsedElement*>(used_address + sizeof(uint16_t) * 2u);
+    // Transitional PCI exposes queue size as read-only. VirtIO-MMIO legacy
+    // devices require QueueNum to be written before QueuePFN is accepted.
+    if (!context.legacy_pci) write_reg(QUEUE_NUM, context.queue_size);
     if (context.version == 1) {
+        if (!context.legacy_pci) {
+            write_reg(GUEST_PAGE_SIZE, 4096);
+            write_reg(QUEUE_ALIGN, 4096);
+        }
         write_reg(QUEUE_PFN, static_cast<uint32_t>(queue_address >> 12));
     } else {
-        write_reg(QUEUE_DESC_LOW, static_cast<uint32_t>(queue_address));
-        write_reg(QUEUE_DESC_HIGH, static_cast<uint32_t>(queue_address >> 32));
-        const uintptr_t driver = reinterpret_cast<uintptr_t>(&context.queue.modern.avail_flags);
-        const uintptr_t device = reinterpret_cast<uintptr_t>(&context.queue.modern.used_flags);
-        write_reg(QUEUE_DRIVER_LOW, static_cast<uint32_t>(driver));
-        write_reg(QUEUE_DRIVER_HIGH, static_cast<uint32_t>(driver >> 32));
-        write_reg(QUEUE_DEVICE_LOW, static_cast<uint32_t>(device));
-        write_reg(QUEUE_DEVICE_HIGH, static_cast<uint32_t>(device >> 32));
+        write_reg(QUEUE_DESC_LOW, static_cast<uint32_t>(context.ring.descriptors_address));
+        write_reg(QUEUE_DESC_HIGH, static_cast<uint32_t>(context.ring.descriptors_address >> 32));
+        write_reg(QUEUE_DRIVER_LOW, static_cast<uint32_t>(context.ring.driver_address));
+        write_reg(QUEUE_DRIVER_HIGH, static_cast<uint32_t>(context.ring.driver_address >> 32));
+        write_reg(QUEUE_DEVICE_LOW, static_cast<uint32_t>(context.ring.device_address));
+        write_reg(QUEUE_DEVICE_HIGH, static_cast<uint32_t>(context.ring.device_address >> 32));
     }
     if (context.version != 1) write_reg(QUEUE_READY, 1);
     return true;
@@ -199,9 +214,9 @@ static bool submit(RequestHeader* header, void* data, uint32_t data_length, bool
     if (!dma::map(header, sizeof(*header), &header_dma, dma::DMA_READ) ||
         !dma::map(const_cast<uint8_t*>(&request_status), sizeof(request_status), &status_dma, dma::DMA_WRITE)) return false;
     if (data_length && !dma::map(data, data_length, &data_dma, device_writes_data ? dma::DMA_WRITE : dma::DMA_READ)) return false;
-    const uint16_t slot = context.queue.modern.avail_index % context.queue_size;
+    const uint16_t slot = *context.ring.avail_index % context.queue_size;
     const uint16_t expected = static_cast<uint16_t>(used_index() + 1);
-    Descriptor* descriptors = context.queue.modern.descriptors;
+    Descriptor* descriptors = context.ring.descriptors;
     descriptors[0] = {header_dma.physical_address, sizeof(*header), 1, 1};
     uint16_t last = 1;
     if (data_length) {
@@ -210,12 +225,13 @@ static bool submit(RequestHeader* header, void* data, uint32_t data_length, bool
     }
     descriptors[last] = {status_dma.physical_address, sizeof(request_status), 2, 0};
     request_status = 0xFF;
-    context.queue.modern.avail_ring[slot] = 0;
+    context.ring.avail_ring[slot] = 0;
     dma::sync_for_device(&header_dma);
     if (data_length) dma::sync_for_device(&data_dma);
     dma::sync_for_device(&status_dma);
     barrier();
-    ++context.queue.modern.avail_index;
+    const uint16_t next_avail = static_cast<uint16_t>(*context.ring.avail_index + 1);
+    *context.ring.avail_index = next_avail;
     barrier();
     write_reg(QUEUE_NOTIFY, 0);
     for (uint32_t spin = 0; spin < 10000000; ++spin) {
@@ -223,6 +239,7 @@ static bool submit(RequestHeader* header, void* data, uint32_t data_length, bool
         // loop. A harmless status-port read gives the VMM a VM-exit point
         // while the bounded polling path remains usable before interrupts.
         if (context.legacy_pci) (void)read_status();
+        else (void)read_reg(STATUS);
         barrier();
         if (used_index() == expected) {
             // QEMU updates the used ring and the request status through
@@ -280,7 +297,9 @@ static storage::Device device{
     } else {
         const uint32_t magic = read_reg(MAGIC);
         const uint32_t device_id = read_reg(DEVICE_ID);
-        if (magic != 0x74726976u || device_id != DEVICE_ID_BLOCK) return false;
+        if (magic != 0x74726976u || device_id != DEVICE_ID_BLOCK) {
+            return false;
+        }
         context.version = read_reg(VERSION);
     }
     write_status(0);
@@ -303,10 +322,14 @@ static storage::Device device{
         write_reg(DRIVER_FEATURES_SEL, 0);
         write_reg(DRIVER_FEATURES, low_negotiated);
         write_reg(DEVICE_FEATURES_SEL, 1);
-        if (!(read_reg(DEVICE_FEATURES) & (1u << VERSION_1_BIT))) return false;
+        if (!(read_reg(DEVICE_FEATURES) & (1u << VERSION_1_BIT))) {
+            return false;
+        }
         write_reg(DRIVER_FEATURES_SEL, 1); write_reg(DRIVER_FEATURES, 1u << VERSION_1_BIT);
         write_status(STATUS_ACK | STATUS_DRIVER | STATUS_FEATURES_OK);
-        if (!(read_status() & STATUS_FEATURES_OK)) return false;
+        if (!(read_status() & STATUS_FEATURES_OK)) {
+            return false;
+        }
     }
     bool read_only = false;
     if (context.version != 1) {
@@ -317,8 +340,12 @@ static storage::Device device{
     const uint32_t low = read_reg(CONFIG + 0);
     const uint32_t high = read_reg(CONFIG + 4);
     context.capacity = static_cast<uint64_t>(low) | (static_cast<uint64_t>(high) << 32);
-    if (!context.capacity) return false;
-    if (!setup_queue()) return false;
+    if (!context.capacity) {
+        return false;
+    }
+    if (!setup_queue()) {
+        return false;
+    }
     write_status(STATUS_ACK | STATUS_DRIVER | (context.version == 1 ? 0 : STATUS_FEATURES_OK) | STATUS_DRIVER_OK);
     context.active = true;
     (void)fua_supported;
@@ -365,14 +392,20 @@ static storage::Device device{
     if (storage::Manager::submit_sync(&device, &read_request) != storage::Status::Success) return false;
     kernel::kprintf("[TEST][PASS] VirtIO-Block read completion\n");
     if (!(device.flags & storage::DEVICE_WRITABLE)) return true;
-    storage::Request write_request{storage::RequestType::Write, 0, 1, write_buffer, storage::REQUEST_FUA, nullptr, nullptr};
+    // Keep the baseline runtime test independent of optional FUA support;
+    // flush completion is verified explicitly below when advertised.
+    storage::Request write_request{storage::RequestType::Write, 0, 1, write_buffer, 0, nullptr, nullptr};
     if (storage::Manager::submit_sync(&device, &write_request) != storage::Status::Success) return false;
     if (storage::Manager::submit_sync(&device, &read_request) != storage::Status::Success) return false;
     for (uint32_t i = 0; i < 512; ++i) if (read_buffer[i] != write_buffer[i]) return false;
     kernel::kprintf("[TEST][PASS] VirtIO-Block write/read completion\n");
-    storage::Request flush_request{storage::RequestType::Flush, 0, 0, nullptr, 0, nullptr, nullptr};
-    if (storage::Manager::submit_sync(&device, &flush_request) != storage::Status::Success) return false;
-    kernel::kprintf("[TEST][PASS] VirtIO-Block flush completion\n");
+    if (device.flags & storage::DEVICE_FLUSH) {
+        storage::Request flush_request{storage::RequestType::Flush, 0, 0, nullptr, 0, nullptr, nullptr};
+        if (storage::Manager::submit_sync(&device, &flush_request) != storage::Status::Success) return false;
+        kernel::kprintf("[TEST][PASS] VirtIO-Block flush completion\n");
+    } else {
+        kernel::kprintf("[TEST][SKIP] VirtIO-Block flush feature unavailable\n");
+    }
     return true;
 }
 }
@@ -399,7 +432,7 @@ bool init() {
             return true;
         }
     }
-    if (!fdt_device_seen) {
+    if (!fdt_device_seen && fdt::boot_pointer()) {
         const uintptr_t mmio_bases[] = {
             0x0A000000ull,
         };
