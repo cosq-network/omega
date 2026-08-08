@@ -1,0 +1,202 @@
+#include "kernel/process.hpp"
+#include "kernel/heap.hpp"
+#include "kernel/memory.hpp"
+#include "kernel/kprint.hpp"
+
+namespace process {
+
+namespace {
+// Keep user mappings in PML4 slots separate from the low kernel identity
+// map.  This allows a new address space to retain all kernel/device mappings
+// while dropping inherited user mappings.
+constexpr uintptr_t USER_MMAP_BASE = 0x0000400000000000ull;
+constexpr uintptr_t USER_MMAP_LIMIT = 0x0000700000000000ull;
+constexpr uint32_t PROT_WRITE = 2;
+constexpr uint32_t PROT_EXEC = 4;
+#if defined(__x86_64__)
+constexpr uint32_t PROT_READ = 1;
+#endif
+constexpr uint32_t MAP_FIXED = 0x10;
+constexpr int64_t ERR_EINVAL = 22;
+constexpr int64_t ERR_ENOMEM = 12;
+constexpr int64_t ERR_ENOSYS = 38;
+constexpr int64_t ERR_EEXIST = 17;
+
+Process* current_process = nullptr;
+pid_t next_pid = 1;
+
+static uintptr_t align_up(uintptr_t value) {
+    if (value > ~(static_cast<uintptr_t>(0)) - (memory::PAGE_SIZE - 1)) return 0;
+    return (value + memory::PAGE_SIZE - 1) & ~(memory::PAGE_SIZE - 1);
+}
+
+static uint32_t page_flags(uint32_t prot) {
+    uint32_t flags = memory::PAGE_PRESENT | memory::PAGE_USER;
+    if (prot & PROT_WRITE) flags |= memory::PAGE_WRITABLE;
+    if (prot & PROT_EXEC) flags |= memory::PAGE_EXEC;
+    return flags;
+}
+
+static bool overlaps(const Process* process, uintptr_t address, size_t length) {
+    if (length == 0 || address > ~(static_cast<uintptr_t>(0)) - length) return true;
+    const uintptr_t end = address + length;
+    for (uint32_t i = 0; i < process->mapping_count; ++i) {
+        if (process->mappings[i].address > ~(static_cast<uintptr_t>(0)) - process->mappings[i].length) return true;
+        const uintptr_t map_end = process->mappings[i].address + process->mappings[i].length;
+        if (address < map_end && end > process->mappings[i].address) return true;
+    }
+    return false;
+}
+
+static bool add_mapping(Process* process, uintptr_t address, size_t length) {
+    if (process->mapping_count >= 32) return false;
+    process->mappings[process->mapping_count++] = {address, length};
+    return true;
+}
+}
+
+void Manager::init() {
+    if (current_process != nullptr) return;
+    current_process = create();
+    if (current_process != nullptr) {
+        security::Manager::bind(&current_process->credentials);
+        (void)memory::VirtualMemoryManager::activate(&current_process->address_space);
+        kernel::kprintf("[+] Linux-compatible process/address-space manager initialized (PID %d).\n",
+                        current_process->pid);
+    } else {
+        kernel::kprintf("[!] Process/address-space manager unavailable on this architecture.\n");
+    }
+}
+
+Process* Manager::current() { return current_process; }
+
+Process* Manager::create() {
+    auto* process = reinterpret_cast<Process*>(kmalloc(sizeof(Process)));
+    if (process == nullptr) return nullptr;
+    process->pid = next_pid++;
+    process->address_space = {0, false};
+    process->next_mmap = USER_MMAP_BASE;
+    process->program_break = 0x60000000ull;
+    process->alive = false;
+    process->credentials = security::Manager::current();
+    for (auto& fd : process->fd_table) fd = nullptr;
+    process->mapping_count = 0;
+    if (!memory::VirtualMemoryManager::create_address_space(&process->address_space)) {
+        kfree(process);
+        return nullptr;
+    }
+    process->alive = true;
+    return process;
+}
+
+int64_t Manager::mmap(uintptr_t address, size_t length, uint32_t prot,
+                      uint32_t flags, int32_t fd, uint64_t offset) {
+    (void)offset;
+    if (current_process == nullptr || length == 0) return -ERR_EINVAL;
+    if (!(flags & 0x20) && fd < 0) return -ERR_EINVAL; // MAP_ANONYMOUS
+    length = align_up(length);
+    if (length == 0 || length > USER_MMAP_LIMIT - USER_MMAP_BASE) return -ERR_EINVAL;
+
+    if (!(flags & MAP_FIXED)) address = current_process->next_mmap;
+    address = address & ~(memory::PAGE_SIZE - 1);
+    if (address < USER_MMAP_BASE || address > USER_MMAP_LIMIT - length) return -ERR_EINVAL;
+    if (overlaps(current_process, address, length)) return -ERR_EEXIST;
+
+    size_t mapped = 0;
+    for (; mapped < length; mapped += memory::PAGE_SIZE) {
+        const uintptr_t frame = memory::PhysicalMemoryManager::alloc_frame();
+        if (frame == 0 || !memory::VirtualMemoryManager::map_page(
+                &current_process->address_space, address + mapped, frame, page_flags(prot))) {
+            for (size_t rollback = 0; rollback < mapped; rollback += memory::PAGE_SIZE) {
+                const uintptr_t old_frame = memory::VirtualMemoryManager::get_physical_address(
+                    &current_process->address_space, address + rollback);
+                memory::VirtualMemoryManager::unmap_page(&current_process->address_space, address + rollback);
+                if (old_frame != 0) memory::PhysicalMemoryManager::free_frame(old_frame);
+            }
+            if (frame != 0) memory::PhysicalMemoryManager::free_frame(frame);
+            return -ERR_ENOMEM;
+        }
+        // Bring-up page tables are identity-mapped in the kernel, so clear
+        // the physical frame through its kernel alias, not the new user VA.
+        auto* page = reinterpret_cast<uint8_t*>(frame);
+        for (size_t i = 0; i < memory::PAGE_SIZE; ++i) page[i] = 0;
+    }
+
+    if (!add_mapping(current_process, address, length)) {
+        for (size_t rollback = 0; rollback < length; rollback += memory::PAGE_SIZE) {
+            const uintptr_t old_frame = memory::VirtualMemoryManager::get_physical_address(
+                &current_process->address_space, address + rollback);
+            memory::VirtualMemoryManager::unmap_page(&current_process->address_space, address + rollback);
+            if (old_frame != 0) memory::PhysicalMemoryManager::free_frame(old_frame);
+        }
+        return -ERR_ENOMEM;
+    }
+    if (address + length > current_process->next_mmap) current_process->next_mmap = address + length;
+    return static_cast<int64_t>(address);
+}
+
+int64_t Manager::munmap(uintptr_t address, size_t length) {
+    if (current_process == nullptr || length == 0 || (address & (memory::PAGE_SIZE - 1))) return -ERR_EINVAL;
+    length = align_up(length);
+    for (uint32_t i = 0; i < current_process->mapping_count; ++i) {
+        Mapping& mapping = current_process->mappings[i];
+        if (mapping.address == address && mapping.length == length) {
+            for (size_t offset = 0; offset < length; offset += memory::PAGE_SIZE) {
+                const uintptr_t frame = memory::VirtualMemoryManager::get_physical_address(
+                    &current_process->address_space, address + offset);
+                memory::VirtualMemoryManager::unmap_page(&current_process->address_space, address + offset);
+                if (frame != 0) memory::PhysicalMemoryManager::free_frame(frame);
+            }
+            current_process->mappings[i] = current_process->mappings[--current_process->mapping_count];
+            return 0;
+        }
+    }
+    return -ERR_EINVAL;
+}
+
+int64_t Manager::brk(uintptr_t address) {
+    if (current_process == nullptr) return -ERR_ENOMEM;
+    if (address == 0) return static_cast<int64_t>(current_process->program_break);
+    if (address < 0x100000ull || address >= USER_MMAP_BASE) return -ERR_EINVAL;
+    current_process->program_break = address;
+    return static_cast<int64_t>(address);
+}
+
+int64_t Manager::fork() {
+    // A Linux-compatible fork must provide COW page semantics. Returning
+    // ENOSYS is safer than duplicating only metadata and exposing shared data.
+    return -ERR_ENOSYS;
+}
+
+int64_t Manager::self_test() {
+#if defined(__x86_64__)
+    if (current_process == nullptr) return -ERR_ENOMEM;
+    Process* first_process = current_process;
+    const int64_t first = mmap(0, memory::PAGE_SIZE, PROT_READ | PROT_WRITE, 0x22, -1, 0);
+    if (first < 0) return first;
+    const uintptr_t first_phys = memory::VirtualMemoryManager::get_physical_address(
+        &first_process->address_space, static_cast<uintptr_t>(first));
+    Process* second_process = create();
+    if (second_process == nullptr || first_phys == 0) {
+        return -ERR_ENOMEM;
+    }
+    current_process = second_process;
+    const int64_t second = mmap(static_cast<uintptr_t>(first), memory::PAGE_SIZE,
+                                PROT_READ | PROT_WRITE, 0x32, -1, 0);
+    const uintptr_t second_phys = second < 0 ? 0 : memory::VirtualMemoryManager::get_physical_address(
+        &second_process->address_space, static_cast<uintptr_t>(second));
+    const bool isolated = second >= 0 && second_phys != 0 && second_phys != first_phys;
+    if (second >= 0) (void)munmap(static_cast<uintptr_t>(second), memory::PAGE_SIZE);
+    current_process = first_process;
+    const int64_t cleanup = munmap(static_cast<uintptr_t>(first), memory::PAGE_SIZE);
+    if (cleanup != 0 || !isolated) {
+        return -ERR_EINVAL;
+    }
+    kernel::kprintf("[TEST][PASS] Isolated process address-space map/unmap\n");
+    return 0;
+#else
+    return -ERR_ENOSYS;
+#endif
+}
+
+} // namespace process

@@ -1,9 +1,13 @@
 # Omega Kernel Implementation Roadmap & Milestone Matrix
 
 ## Overview
-This document outlines the multi-phase implementation roadmap for **Omega**—a freestanding, cross-platform microkernel core written in C++20. Omega cross-compiles natively on macOS (Apple Silicon M1/M2/M3) using Clang and LLVM (`ld.lld`) for **x86_64**, **AArch64**, and **RISC-V 64 (`rv64gc`)** architectures.
+This document outlines the multi-phase implementation roadmap for **Omega**—a cross-platform microkernel core written in C++20. Omega cross-compiles natively on macOS (Apple Silicon M1/M2/M3) using Clang and LLVM (`ld.lld`) for **x86_64**, **AArch64**, and **RISC-V 64 (`rv64gc`)** architectures.
 
-Phases **1–6** cover the research-kernel foundation (completed). Phases **7–12** describe the realistic path from QEMU-proven subsystems to a **production-grade operating system** suitable for laptops, desktops, tablets, and phones.
+Phases **1–6** cover the research-kernel foundation, with userspace items
+remaining partial where their native execution path is not installed. Phases
+**7–12** describe the realistic path from QEMU-proven subsystems to a
+**production-grade operating system** suitable for laptops, desktops, tablets,
+and phones.
 
 ### Architecture maturity baseline
 
@@ -35,16 +39,16 @@ networking, display, input, recovery, and a stable userspace ABI.
 | **Phase 2B: AArch64 Exception Levels** | `COMPLETED` | EL2 to EL1 drop & vector base register configuration | `CurrentEL`, `VBAR_EL1`, `SP_EL1` stack | QEMU `-M virt` |
 | **Phase 2C: RISC-V 64 S-Mode & Traps** | `COMPLETED` | Supervisor Mode (S-mode) boot & trap vector setup | `satp` (Sv39), `stvec`, OpenSBI console `ecall` | QEMU `-M virt -bios default` |
 | **Phase 3A: Physical Memory (PMM)** | `COMPLETED` | 4KiB Bitmap frame allocator | `alloc_frame` / `free_frame` | Physical Bitmap Matrix |
-| **Phase 3B: Virtual Memory (VMM)** | `COMPLETED` | Architectural page table mapping engine | `CR3` (x86), `TTBR0_EL1` (ARM), `satp` (RISC-V) | `vmm_map_page` |
+| **Phase 3B: Virtual Memory (VMM)** | `PARTIAL` | x86_64 mapping engine plus AArch64/RISC-V identity-map bring-up | `CR3` (x86), `TTBR0_EL1` (ARM), `satp` (RISC-V) | x86 mapping/isolation tests and all-ISA builds |
 | **Phase 3C: Dynamic Kernel Heap** | `COMPLETED` | Free-list block header allocator | `kmalloc` / `kfree` with block coalescing | Static Heap Buffer |
 | **Phase 3D: Interrupt Drivers** | `COMPLETED` | Hardware interrupt gate setup | 256-entry IDT (x86), VBAR (ARM), STVEC/PLIC (RISC-V) | Hardware Traps |
 | **Phase 4A: Preemptive Multi-threading**| `COMPLETED` | Round-robin thread scheduler | Thread Control Blocks (TCB), stack allocation | Cooperative Yields |
-| **Phase 4B: System Call ABI Dispatcher**| `COMPLETED` | Formal System Call ABI dispatcher (`docs/ABI.md`) | `SYS_YIELD`, `SYS_WRITE`, `SYS_EXIT` | Syscall Dispatcher |
+| **Phase 4B: System Call ABI Dispatcher**| `PARTIAL` | Linux-numbered six-argument dispatcher and fail-closed syscall foundation (`docs/ABI.md`) | `SYS_YIELD`, `SYS_WRITE`, memory and credential calls | Unit/integration dispatcher coverage; native trap entry pending |
 | **Phase 5A: Virtual Filesystem (VFS)** | `COMPLETED` | VFS node tree & root directory mount | POSIX node operations, `/` mount | `vfs::open("/")` |
 | **Phase 5B: RAM Disk Initrd** | `COMPLETED` | Initial RAM disk memory file driver | Memory file header reader | `initrd::init()` |
-| **Phase 5.1: Userland Privilege Mode**| `COMPLETED` | Ring 3 / EL0 / U-Mode privilege manager | Userland stack setup & mode jump | `enter_userland()` |
-| **Phase 5.2: ELF 64-bit Binary Parser**| `COMPLETED` | Executable binary header & segment parser | `Elf64Header` & `PT_LOAD` loader | `ElfLoader::load()` |
-| **Phase 5.3: POSIX Syscall Expansion** | `COMPLETED` | Process file descriptor table & core syscalls | `sys_open`, `sys_read`, `sys_close`, `sys_fork`, `sys_execve` | `fd_table[16]` |
+| **Phase 5.1: Userland Privilege Mode**| `PARTIAL` | Fail-closed Ring 3 / EL0 / U-Mode entry contract; native privilege transition remains pending | Userland entry validation and architecture trap frames | `enter_userland()` |
+| **Phase 5.2: ELF 64-bit Binary Parser**| `PARTIAL` | Bounded executable header and program-header validation | `Elf64Header` & safe `PT_LOAD` checks | `ElfLoader::validate(data, size)` |
+| **Phase 5.3: POSIX Syscall Expansion** | `PARTIAL` | Linux-numbered dispatcher, process-owned descriptor foundation, and safe failure paths | `sys_open`, `sys_read`, `sys_close`, memory and credential calls | `scripts/test_process.sh`, syscall unit coverage |
 | **Phase 5.4: PCI Bus Scanner** | `COMPLETED` | PCI bus configuration space reader | I/O Ports `0xCF8`/`0xCFC` scanning | Device Vendor Scan |
 | **Phase 5.5: VirtIO Network Stack** | `COMPLETED` | VirtIO-Net packet driver & TCP/IP stack | L2 Ethernet, L3 IPv4, L4 UDP/TCP headers | Frame RX Reader |
 | **Phase 6A: Bootable Disk Generator** | `COMPLETED` | UEFI/GPT multi-format disk generator | RAW, QCOW2, VMDK, VDI with FAT32 payloads | `create_bootable_disk.sh` |
@@ -76,7 +80,7 @@ These decisions must be locked before large-scale production investment. They ar
 | :--- | :--- | :--- | :--- |
 | **Kernel model** | Pure microkernel vs hybrid | Hybrid microkernel (drivers in userspace, performance-critical paths optimized) | Driver IPC overhead, security boundary, development velocity |
 | **Primary ISA for v1** | x86_64, AArch64, RISC-V | **AArch64** (mobile/tablet) + **x86_64** (desktop/laptop); defer RISC-V until hardware partners exist | Toolchain focus, driver porting effort |
-| **App compatibility model** | Custom SDK, Linux ABI, Android (ART) | Custom SDK v1 with optional Linux ABI subset for developer tooling | Defines 50%+ of userland and ecosystem work |
+| **App compatibility model** | Omega SDK, Linux ABI, Android (ART) | Omega SDK v1 with a Linux-compatible static rebuild profile; shared-library and broader binary compatibility follow the dynamic-loader milestone | Defines 50%+ of userland and ecosystem work |
 | **Distribution model** | Open community vs OEM-only | Open reference images + OEM partnership track for phones | Legal, signing keys, update infrastructure |
 | **Security baseline** | Capabilities, SELinux-style MAC, sandbox-only | Capability-based IPC + per-app sandbox with explicit permission prompts | Mobile readiness, app store trust model |
 
@@ -94,8 +98,8 @@ Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsys
 | **Phase 7.2: System Display Module (Standard VGA)** | `COMPLETED` | x86_64 VGA text mode, Bochs VBE linear FB, dual serial+display console | `hal::Display`, Bochs DISPI 1024×768×32, 8×16 font, Multiboot2 FB tag, `kprintf` mirroring | `scripts/test_display.sh`, CI, OVD `--gpu` |
 | **Phase 7.2b: AArch64 & RISC-V Display** | `IN PROGRESS` | SimpleFb (DT), shared FDT parser, portable framebuffer console, and guarded VirtIO-GPU MMIO foundation | FDT walker, DT pointer handoff, `SimpleFb` HALs, identity-map VMM bring-up, VirtIO-GPU protocol/queue scaffold, serial fallback | `scripts/test_display_aarch64.sh`, QEMU AArch64/RISC-V smoke tests |
 | **Phase 7.3: SMP Multi-Core** | `PLANNED` | Symmetric multiprocessing across all cores | APIC ICR (x86), PSCI (AArch64), OpenSBI IPI (RISC-V); per-CPU run queues | Multi-core boot log, parallel thread execution |
-| **Phase 7.4: Timer-Driven Preemption** | `PLANNED` | Replace cooperative yield with hardware timer preemption | Periodic tick interrupt, preemptive context switch | Latency benchmark under load |
-| **Phase 7.5: Per-Process Address Spaces** | `PLANNED` | Isolated virtual address space per process | Separate page tables per process, kernel/user boundary enforcement | Two processes with distinct mappings |
+| **Phase 7.4: Timer-Driven Preemption** | `PARTIAL` | x86_64 PIT IRQ0, interrupt-frame scheduler switching, and guarded two-thread self-test; AArch64/RISC-V timers remain planned | QEMU x86_64 preemption/context-switch test; architecture timer ports pending |
+| **Phase 7.5: Per-Process Address Spaces** | `PARTIAL` | x86_64 cloned roots, dedicated user mapping slots, isolated anonymous `mmap`/`munmap`, process-owned credentials/descriptors, Linux syscall numbering, and bounded user-range checks; mapped `brk`, COW, native ARM/RISC-V roots, and active scheduler address-space switching remain | QEMU two-process mapping isolation plus all-ISA builds and permission checks; COW and native non-x86 page tables pending |
 | **Phase 7.6: IPC Foundation** | `PLANNED` | Inter-process communication for microkernel services | Message passing, capability tokens, shared-memory grants | Driver server ↔ client round-trip |
 
 **Exit criteria:** Omega boots in QEMU with block storage, **graphical console on x86_64 (done)**, SMP, preemptive scheduling, process isolation, and a userspace driver server communicating over IPC.
@@ -145,10 +149,11 @@ complete.
 | Milestone | Status | Deliverable | Verification |
 | :--- | :---: | :--- | :--- |
 | **7.D.1 Timer-independent scheduler core** | `PLANNED` | Architecture-neutral scheduler clock, priorities, accounting, and preemption hooks | Identical scheduler tests on all ISAs |
-| **7.D.2 Per-process address spaces** | `PLANNED` | Isolated page tables, syscall validation, copy-on-write prerequisites, guard regions | Two-process isolation and fault tests |
+| **7.D.2 Per-process address spaces** | `PARTIAL` | x86_64 isolated page tables, process-owned Linux-style credentials/descriptors, syscall numbering, anonymous mappings, and bounded user-range checks; mapped heap growth, COW, active switching, and native ARM/RISC-V roots remain | Two-process mapping and cross-ISA build/permission matrix; COW/fault tests pending |
 | **7.D.3 Capability-based IPC** | `PLANNED` | Typed messages, endpoint ownership, capability transfer, shared-memory grants, timeout/cancellation | Driver-server round-trip and abuse tests |
 | **7.D.4 Portable driver contracts** | `PLANNED` | Common interrupt, DMA, MMIO, block, net, display, and input interfaces | Synthetic drivers plus all-ISA contract tests |
-| **7.D.5 Userspace bootstrap** | `PLANNED` | Init process, process lifecycle, shell over serial, libc bootstrap, stable ABI versioning | End-to-end ELF/init/syscall test |
+| **7.D.5 Userspace bootstrap** | `PLANNED` | Init process, process lifecycle, shell over serial, Omega SDK CRT/libc bootstrap, stable ABI versioning | End-to-end ELF/init/syscall test |
+| **7.D.6 Linux identity and permission model** | `PARTIAL` | UID/GID credentials, supplementary groups, umask, root DAC rules, mode bits, VFS traversal/read/write checks, process binding on the x86_64 foundation, and Linux syscall-number tables on all ISAs | `scripts/test_security.sh`, all-ISA builds/permission checks, ext4 ownership/mode parsing |
 
 **Architecture-track exit criteria:** each target boots on its reference QEMU
 machine with validated interrupt delivery, timer-driven preemption, SMP,
@@ -564,13 +569,13 @@ Year 4–5      Phase 10C + 11       Phone product, public release, OEM partners
 
 Concrete sequence mapped to the existing codebase:
 
-1. **Complete shared Phase 7 services** — timer-driven preemption, per-process address spaces, capability IPC, portable DMA/MMIO contracts, and the userspace init path.
+1. **Complete shared Phase 7 services** — architecture-native timer/SMP support, active per-process address-space switching, fault-safe user-pointer validation, COW, capability IPC, portable DMA/MMIO contracts, Linux-compatible userspace init, and process reaping.
 2. **Finish x86_64 P0 parity** — ACPI, APIC/x2APIC, HPET/TSC, SMP, MSI/MSI-X, UEFI GOP, PCIe ECAM, and hardened memory permissions on QEMU `q35`.
 3. **Finish AArch64 P0 parity** — PSCI, complete GICv3 support, generic timers, SMP, cache/MMU attributes, UEFI/DT normalization, and VirtIO-MMIO completion on QEMU `virt`.
 4. **Advance RISC-V P1 parity** — SBI HSM/timer/IPI services, SMP, PLIC hardening, AIA capability planning, Sv48/PMP preparation, and VirtIO-MMIO completion on QEMU `virt`.
 5. **Complete storage and display reference paths** — NVMe/AHCI/SDHCI/USB layers, ext4 writeback, AArch64/RISC-V VirtIO-GPU, UEFI GOP, and real framebuffer integration. *(Standard VGA and x86_64 transitional VirtIO-Block completion are validated.)*
 6. **Validate one reference board per ISA** — QEMU `q35`/OVMF, QEMU AArch64 `virt`, QEMU RISC-V `virt`, then Raspberry Pi 4/5 and one x86_64 laptop.
-7. **Build the userspace base** — Minimal init, serial shell, libc subset, process tools, filesystem utilities, and a versioned syscall/IPC ABI in `docs/ABI.md`.
+7. **Build the userspace base** — Minimal init, serial shell, Omega SDK CRT/libc, process tools, filesystem utilities, passwd/group/permission tooling, and a versioned Linux-compatible syscall/IPC ABI in `docs/ABI.md`.
 8. **Move drivers behind IPC** — Storage, network, display, input, and USB as capability-scoped userspace servers with measured IPC overhead.
 9. **Keep OVD aligned with kernel maturity** — Add architecture capability gates, live boot matrices, device hotplug scenarios, artifact manifests, and profile readiness checks for each QEMU reference target.
 10. **Defer phone work** — Until x86_64 and AArch64 laptop/tablet reference systems demonstrate reliable boot, storage, networking, display, input, power, recovery, and userspace quality.
@@ -592,7 +597,7 @@ Concrete sequence mapped to the existing codebase:
 - **Microkernel IPC overhead:** Must be measured and optimized early to avoid performance regressions vs monolithic kernels.
 - **Phone certification:** Regulatory and carrier approval adds 6–12 months beyond software readiness.
 
-Omega's multi-arch HAL, freestanding C++20 runtime, formal syscall ABI, and OVD tooling provide a strong kernel-side foundation. The critical path to production runs through **real hardware drivers, userland maturity, and ecosystem tooling**—not additional QEMU subsystems alone.
+Omega's multi-arch HAL, C++20 kernel runtime, formal syscall ABI, and OVD tooling provide a strong kernel-side foundation. The critical path to production runs through **real hardware drivers, userland maturity, and ecosystem tooling**—not additional QEMU subsystems alone.
 
 ---
 
@@ -602,6 +607,7 @@ Omega's multi-arch HAL, freestanding C++20 runtime, formal syscall ABI, and OVD 
 | :--- | :--- |
 | `docs/ARCHITECTURE.md` | Kernel architecture and HAL design |
 | `docs/ABI.md` | System call ABI specification |
+| `docs/OMEGA_SDK_PLAN.md` | Lightweight C/C++ SDK, sysroot, runtime, and Linux artifact compatibility plan |
 | `docs/FIRMWARE_BOOT.md` | UEFI, U-Boot, and Coreboot compatibility |
 | `docs/RUNNING.md` | Build and QEMU execution guide |
 | `docs/VGA_DISPLAY_PLAN.md` | System Display Module — x86_64 Standard VGA (Phase 7.2) |

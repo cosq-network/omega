@@ -13,12 +13,22 @@ enum PageFlags {
     PAGE_DEVICE   = (1 << 4),
 };
 
+struct AddressSpace {
+    uintptr_t root;
+    bool valid;
+};
+
 class VirtualMemoryManager {
 public:
     static void init();
     static bool map_page(uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags);
     static bool unmap_page(uintptr_t virt_addr);
     static uintptr_t get_physical_address(uintptr_t virt_addr);
+    static bool create_address_space(AddressSpace* space);
+    static bool map_page(AddressSpace* space, uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags);
+    static bool unmap_page(AddressSpace* space, uintptr_t virt_addr);
+    static uintptr_t get_physical_address(const AddressSpace* space, uintptr_t virt_addr);
+    static bool activate(const AddressSpace* space);
 
 private:
     static uintptr_t current_pml4_or_ttbr;

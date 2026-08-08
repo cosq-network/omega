@@ -24,6 +24,7 @@ struct Thread {
     uintptr_t stack_ptr;
     void (*entry_point)();
     Thread* next;
+    uint64_t switches;
 };
 
 class Scheduler {
@@ -32,6 +33,12 @@ public:
     static Thread* create_thread(void (*entry)());
     static void yield();
     static void schedule();
+    static void block_current();
+    static void wake(Thread* thread);
+    static uintptr_t timer_tick(uintptr_t saved_stack);
+    static void run_current();
+    [[noreturn]] static void thread_exit();
+    static uint64_t tick_count();
 
 private:
     static Thread* current_thread;

@@ -11,16 +11,19 @@
   - **x86_64 (x64)**: 64-bit Long Mode entry, PAE paging, PML4 4-level page tables (2MB Huge Pages identity mapping), GDT loading, Xen PVH ELF note (`.xen_note`) for direct QEMU booting, and **Standard VGA** output (VGA text mode + Bochs VBE linear framebuffer).
   - **AArch64 (ARM64)**: Dynamic Exception Level transition (`EL2 -> EL1`), 2048-byte aligned `VBAR_EL1` vector table, and `SP_EL1` stack setup.
   - **RISC-V 64 (`rv64gc`)**: Supervisor Mode (S-mode) boot entry, `Sv39` 3-level page tables, `stvec` trap vector, OpenSBI console `ecall` interface, `satp` register mapping, and validated OpenSBI-to-`kernel_main()` handoff.
-- **Freestanding C++20 Runtime**: Independent of host C/C++ standard libraries (`-ffreestanding -fno-exceptions -fno-rtti`). Implements freestanding memory primitives (`memcpy`, `memset`, `memmove`, `memcmp`) and vararg printing (`kprintf`).
+- **Omega C++20 Kernel Runtime**: Independent of host C/C++ standard libraries (`-ffreestanding -fno-exceptions -fno-rtti`). Implements Omega's memory primitives (`memcpy`, `memset`, `memmove`, `memcmp`) and vararg printing (`kprintf`).
 - **Physical Memory Manager (PMM)**: 4KiB Bitmap Frame Allocator tracking physical page frames (`alloc_frame` / `free_frame`).
-- **Virtual Memory Manager (VMM)**: 4-Level Page Table Mapping Engine interacting with architectural base registers (`CR3` on x86_64, `TTBR0_EL1` on AArch64, `satp` on RISC-V 64).
+- **Virtual Memory Manager (VMM)**: Architectural bring-up page-table support through `CR3` on x86_64, `TTBR0_EL1` on AArch64, and `satp` on RISC-V 64; x86_64 also has per-process roots, dedicated user PML4 slots, and isolated anonymous mappings.
 - **Dynamic Kernel Heap Allocator**: Free-list block header allocator providing standard C ABI bindings (`kmalloc` / `kfree`) with 8-byte alignment and block coalescing.
 - **Hardware Interrupt Architecture**: 256-entry Interrupt Descriptor Table (IDT) for x86_64, System Vector Base (`VBAR_EL1`) for AArch64, and Supervisor Trap Vector (`stvec`) / PLIC for RISC-V 64.
-- **Preemptive Multi-threading Scheduler**: Circular linked list Thread Control Block (TCB) engine executing round-robin thread yields and context switching.
-- **System Call ABI Dispatcher**: Formal System Call ABI (`docs/ABI.md`) supporting `SYS_YIELD` (1), `SYS_WRITE` (2), `SYS_EXIT` (3), `SYS_OPEN` (4), `SYS_READ` (5), `SYS_CLOSE` (6), `SYS_FORK` (7), `SYS_EXECVE` (8).
-- **Virtual Filesystem (VFS) & Initrd RAM Disk**: POSIX-like node tree structure (`/` root node) and memory-backed initial RAM disk file reader.
-- **Userland Mode Manager**: Privilege boundary control (Ring 3 / EL0 / U-Mode) and user stack frame allocation.
-- **ELF 64-bit Executable Parser & Loader**: `Elf64Header` and `Elf64ProgramHeader` parser loading `PT_LOAD` segment virtual addresses into memory.
+- **Preemptive Multi-threading Scheduler**: Round-robin TCB engine with x86_64 PIT preemption, real interrupt-frame context switching, cooperative yield integration, and guarded cross-architecture fallback behavior.
+- **Linux-Compatible System Call ABI**: Architecture-specific Linux syscall numbering for x86_64, AArch64, and RISC-V 64, six-argument dispatch, Linux-style negative errno returns, and memory/process/credential syscall foundations. Native trap entry is not enabled yet. See [`docs/ABI.md`](docs/ABI.md).
+- **Virtual Filesystem (VFS) & Initrd RAM Disk**: POSIX-like node tree with Linux-style UID/GID ownership, mode bits, umask-aware security foundations, traversal checks, and read/write permission enforcement.
+- **Linux-Compatible Users, Groups & Permissions**: Real/effective/saved filesystem IDs, supplementary groups, root DAC behavior, `chmod`/`chown`, `setuid`/`setgid`, `setgroups`, `umask`, and shared permission semantics on all three ISAs.
+- **Process Address-Space Foundation**: x86_64 cloned page-table roots, dedicated user mappings, process-owned credentials/descriptors, isolated anonymous `mmap`/`munmap`, and QEMU mapping-isolation verification; COW `fork`, mapped `brk`, isolated `execve`, active scheduler address-space switching, and native AArch64/RISC-V process page tables remain planned.
+- **Userland Mode Manager**: Fail-closed privilege-boundary placeholder for Ring 3 / EL0 / U-Mode; native privilege entry remains pending architecture trap-frame work.
+- **ELF 64-bit Executable Validator**: Bounded `Elf64Header`/`Elf64ProgramHeader` validation for matching static ELF64 images; segment mapping and execution remain pending.
+- **Linux ELF Artifact Boundary**: Validates matching-ISA ELF64 `ET_EXEC`/static `ET_DYN` program headers; static archives are link-time inputs, while dynamic `.so` execution remains gated on Omega's future dynamic linker.
 - **PCI Bus Scanner**: Bus configuration space reader (`0xCF8` Address / `0xCFC` Data ports) enumerating vendor/device IDs across 256 PCI buses.
 - **VirtIO Network Stack**: VirtIO-Net packet reader, Ethernet L2, IPv4 L3, and UDP/TCP L4 stack headers.
 - **System Display Module (x86_64 Standard VGA)**: Layered display HAL with VGA text mode (80×25 at `0xB8000`), Bochs VBE linear framebuffer (1024×768×32 via DISPI), Multiboot2 framebuffer handoff, 8×16 bitmap font, and a kernel graphical console. `kprintf` output is mirrored to serial (COM1) and the active display backend concurrently.
@@ -105,6 +108,7 @@ omega/
 ├── docs/
 │   ├── ARCHITECTURE.md            # Architectural Specification
 │   ├── ABI.md                     # System Call ABI Specification
+│   ├── OMEGA_SDK_PLAN.md          # Lightweight C/C++ SDK and Linux artifact ABI plan
 │   ├── FIRMWARE_BOOT.md           # U-Boot & Coreboot Firmware Compatibility
 │   ├── RISCV64_PLAN.md            # RISC-V 64 Architectural Plan
 │   ├── ROADMAP.md                 # Multi-Phase Implementation Roadmap
@@ -136,6 +140,10 @@ omega/
 │   ├── test_display_aarch64.sh    # AArch64 display HAL/fallback smoke test
 │   ├── test_storage_unit.sh       # Host storage API/partition unit tests
 │   ├── test_storage.sh            # Storage unit + all-ISA QEMU integration tests
+│   ├── test_process.sh            # x86_64 process mapping isolation test
+│   ├── test_security.sh           # Linux credentials and VFS permission tests
+│   ├── test_scheduler.sh          # x86_64 timer/context-switch test
+│   ├── test_elf_loader.sh         # Linux ELF64 artifact validation test
 │   ├── test_scripts_unit.py       # Python launcher and emulator unit-test entry point
 │   └── test_disk_images.sh        # Disk Image Verification Test Suite
 └── kernel/
@@ -244,6 +252,10 @@ QMP, and GUI guide, see [`emulator/README.md`](emulator/README.md).
 ./scripts/test_display_aarch64.sh # AArch64 display HAL and serial-fallback smoke test
 ./scripts/test_storage_unit.sh # Host storage API and partition unit tests
 ./scripts/test_storage.sh      # Storage tests on x86_64, AArch64, and RISC-V
+./scripts/test_process.sh      # x86_64 process page-table/mapping isolation
+./scripts/test_security.sh     # Linux UID/GID/group/mode/VFS permission tests
+./scripts/test_scheduler.sh    # x86_64 timer preemption/context switching
+./scripts/test_elf_loader.sh   # Linux ELF64 executable/shared-object validation
 python3 scripts/test_scripts_unit.py # Python emulator manager and dry-run unit tests
 ./scripts/test_disk_images.sh   # Bootable disk image tests
 python3 -m unittest emulator.test_ovd_unit # OVD configuration and lifecycle tests

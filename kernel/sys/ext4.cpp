@@ -26,6 +26,8 @@ struct Fs {
 };
 struct Inode {
     uint16_t mode;
+    uint16_t uid;
+    uint16_t gid;
     uint32_t flags;
     uint64_t size;
     uint8_t block[60];
@@ -87,6 +89,8 @@ static bool read_inode(Fs* fs, uint32_t inode_number, Inode* out) {
     if (!read_block(fs, inode_block, block) || inode_offset + fs->inode_size > fs->block_size) return false;
     const uint8_t* raw = block + inode_offset;
     out->mode = le16(raw);
+    out->uid = le16(raw + 2);
+    out->gid = le16(raw + 24);
     out->flags = le32(raw + 32);
     out->size = le32(raw + 4);
     if (fs->inode_size >= 112) out->size |= static_cast<uint64_t>(le32(raw + 108)) << 32;
@@ -194,6 +198,9 @@ static vfs::VfsNode* make_node(Fs* fs, uint32_t inode_number, const char* name) 
     for (size_t i = 0; i + 1 < sizeof(node->name) && name && name[i]; ++i) node->name[i] = name[i];
     node->name[sizeof(node->name) - 1] = '\0';
     node->type = (inode.mode & 0xF000u) == 0x4000u ? vfs::DIRECTORY_TYPE : vfs::FILE_TYPE;
+    node->uid = inode.uid;
+    node->gid = inode.gid;
+    node->mode = inode.mode & 07777u;
     node->size = inode.size; node->flags = fs->readonly ? 1u : 0u;
     node->read = file_read; node->write = node->type == vfs::FILE_TYPE ? file_write : nullptr;
     node->finddir = node->type == vfs::DIRECTORY_TYPE ? find_directory : nullptr; node->fs_data = data;

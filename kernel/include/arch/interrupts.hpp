@@ -6,6 +6,7 @@
 namespace hal {
 
 void interrupts_init();
+void timer_init(uint32_t frequency_hz);
 void interrupts_enable();
 void interrupts_disable();
 

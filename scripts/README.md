@@ -25,6 +25,9 @@ the toolchain files in `cmake/` and target `x86_64`, `aarch64`, and `riscv64`.
 | `test_display_aarch64.sh` | AArch64 display HAL and serial fallback smoke test | Build output and temporary QEMU logs |
 | `test_storage_unit.sh` | Host-side storage API, write-policy, and partition parser unit tests | `build/storage-tests/` |
 | `test_storage.sh` | Storage unit tests, all-ISA boot tests, x86_64 transitional VirtIO-Block runtime completion, and AArch64/RISC-V VirtIO-Block builds | Build output and temporary QEMU logs |
+| `test_process.sh` | x86_64 process page-table creation and independent anonymous mapping test | `build/process-x86_64/` |
+| `test_security.sh` | Linux UID/GID, supplementary-group, mode, and VFS permission tests | `build/security-tests/` |
+| `test_elf_loader.sh` | Linux ELF64 executable/shared-object validation tests | `build/elf-tests/` |
 | `test_scripts_unit.py` | Python emulator manager, profile, archive, snapshot, readiness, VNC, GUI-import, and dry-run tests | Temporary files only |
 | `../emulator/test_profile_catalog.py` | Python profile schema/catalog and deterministic rendering tests | Temporary files only |
 | `../emulator/test_profile_ext4_integration.py` | Python profile-backed ext4 policy tests | Temporary files only |
@@ -116,6 +119,9 @@ for experiments.
 ```sh
 ./scripts/test_storage_unit.sh
 ./scripts/test_storage.sh
+./scripts/test_process.sh
+./scripts/test_security.sh
+./scripts/test_elf_loader.sh
 ```
 
 The host unit suite exercises the common storage manager with a fake block

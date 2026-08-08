@@ -36,6 +36,10 @@ struct Elf64ProgramHeader {
 class ElfLoader {
 public:
     static bool validate(const uint8_t* elf_data);
+    static bool validate(const uint8_t* elf_data, size_t image_size);
+    static uintptr_t load(const uint8_t* elf_data, size_t image_size);
+    // Unsized loading cannot be made memory-safe; retained as a compatibility
+    // entry that fails closed.
     static uintptr_t load(const uint8_t* elf_data);
 };
 

@@ -1,13 +1,16 @@
 # Omega Kernel: Application Binary Interface (ABI) Specification
 
 ## Executive Summary
-This specification defines the formal Application Binary Interface (ABI) of the **Omega** kernel. It describes the memory layout, linkage conventions, system call calling conventions, privilege boundaries, and file descriptor semantics across all supported 64-bit architectures: **x86_64 (AMD64)**, **AArch64 (ARM64)**, and **RISC-V 64 (`rv64gc`)**.
+This specification defines the formal Application Binary Interface (ABI) of the **Omega** kernel and the Omega SDK boundary. It describes memory layout, linkage conventions, system call calling conventions, privilege boundaries, file descriptors, and Linux artifact requirements across **x86_64 (AMD64)**, **AArch64 (ARM64)**, and **RISC-V 64 (`rv64gc`)**.
 
 ---
 
 ## 1. System Call Architecture & Calling Conventions
 
-Omega system calls utilize dedicated architectural trap instructions to transition from Userland (Ring 3 / EL0 / U-Mode) to Kernel Mode (Ring 0 / EL1 / S-Mode).
+The register and instruction table below is the planned userspace syscall
+entry contract. The current kernel exposes a dispatcher for tests and bring-up;
+native Ring 3/EL0/U-Mode trap entry is not enabled yet and userland entry fails
+closed until architecture-specific trap frames and selectors are installed.
 
 ### Register Passing Conventions Across Architectures
 
@@ -28,22 +31,68 @@ Omega system calls utilize dedicated architectural trap instructions to transiti
 
 ## 2. System Call Registry & Numerical Identifiers
 
-| Syscall Number | Symbolic Name | Prototype Definition | Description |
-| :---: | :--- | :--- | :--- |
-| `1` | `SYS_YIELD` | `int sys_yield(void)` | Yield CPU execution slice to next ready thread |
-| `2` | `SYS_WRITE` | `long sys_write(int fd, const char* buf, size_t count)` | Write buffer bytes to specified file descriptor |
-| `3` | `SYS_EXIT` | `void sys_exit(int status)` | Terminate current user thread with exit code |
-| `4` | `SYS_OPEN` | `int sys_open(const char* path, int flags)` | Open file path and return process file descriptor |
-| `5` | `SYS_READ` | `long sys_read(int fd, char* buf, size_t count)` | Read bytes from file descriptor into user buffer |
-| `6` | `SYS_CLOSE` | `int sys_close(int fd)` | Close active process file descriptor |
-| `7` | `SYS_FORK` | `int sys_fork(void)` | Duplicate executing process address space and thread |
-| `8` | `SYS_EXECVE` | `int sys_execve(const char* path, char** argv, char** envp)` | Replace process image with new 64-bit ELF executable |
+Omega uses Linux-native syscall numbers per target ABI. The x86_64 table is
+the primary v1 ABI; AArch64 and RV64 use their corresponding Linux numbers.
+System calls return non-negative results on success and `-errno` on failure.
+
+| Symbolic Name | x86_64 | AArch64/RV64 | Prototype |
+| :--- | :---: | :---: | :--- |
+| `SYS_READ` | `0` | `63` | `ssize_t read(int fd, void *buf, size_t count)` |
+| `SYS_WRITE` | `1` | `64` | `ssize_t write(int fd, const void *buf, size_t count)` |
+| `SYS_CLOSE` | `3` | `57` | `int close(int fd)` |
+| `SYS_MMAP` | `9` | `222` | `void *mmap(void *addr, size_t len, int prot, int flags, int fd, off_t off)` |
+| `SYS_MUNMAP` | `11` | `215` | `int munmap(void *addr, size_t len)` |
+| `SYS_BRK` | `12` | `214` | `int brk(void *addr)` |
+| `SYS_SCHED_YIELD` | `24` | `124` | `int sched_yield(void)` |
+| `SYS_FORK` | `57` | clone-based | `pid_t fork(void)` |
+| `SYS_EXECVE` | `59` | `221` | `int execve(const char *path, char *const argv[], char *const envp[])` |
+| `SYS_EXIT` | `60` | `93` | `void exit(int status)` |
+| `SYS_WAIT4` | `61` | `260` | `pid_t wait4(pid_t, int *, int, void *)` |
+| `SYS_OPENAT` | `257` | `56` | `int openat(int dirfd, const char *path, int flags, mode_t mode)` |
+
+Credential calls use the native Linux per-ISA numbers for `getuid`, `geteuid`,
+`getgid`, `getegid`, `setuid`, `setgid`, `setresuid`, `setresgid`,
+`getgroups`, `setgroups`, and `umask`. File ownership uses `chmod`,
+`chown`/`fchownat`, and `fchmodat` are represented in the dispatcher. Mature
+Linux-style negative-errno behavior is the contract; unsupported or
+architecture-dependent paths still fail explicitly until their full
+implementation milestones are complete.
+
+`fork`, `execve`, and `wait4` currently return `-ENOSYS` until copy-on-write,
+isolated ELF replacement, and process reaping are implemented. The former
+Omega numbers remain source-level compatibility aliases only.
+
+## 3. Linux Users, Groups, Roles, and File Permissions
+
+All architectures use the Linux credential model:
+
+- `uid`, `euid`, `suid`, and `fsuid` are 32-bit user IDs.
+- `gid`, `egid`, `sgid`, and `fsgid` are 32-bit group IDs.
+- Supplementary groups are represented as a bounded group list.
+- UID 0 has root DAC override semantics; execute permission still requires an
+  execute bit, matching Linux's practical root behavior.
+- File modes use the standard owner/group/other bits (`0400`, `0200`, `0100`,
+  through `0001`) and are evaluated using the filesystem UID/GID.
+- New-file umask state is stored per credential set and defaults to `0022`.
+
+VFS traversal requires execute permission on each directory. File reads and
+writes require the corresponding mode bit; `chmod` is restricted to the file
+owner or root, while `chown` and supplementary-group changes require root.
+The credential and mode-checking implementation is shared across x86_64,
+AArch64, and RV64 builds. Process-bound credential activation is currently
+available when the x86_64 process manager is active; early boot and standalone
+tests use a controlled fallback credential set. A full capability model and
+architecture-native userspace fault handling remain hardening work.
+
 
 ---
 
-## 3. Standard File Descriptor Index Allocation
+## 4. Standard File Descriptor Index Allocation
 
-Per-process file descriptor tables (`fd_table[16]`) allocate standard I/O Streams upon process initialization:
+The x86_64 process foundation owns a 16-entry descriptor table per process.
+Descriptors 0–2 are reserved for future standard streams, but are not opened
+automatically yet. `open`/`openat` currently allocate descriptors from 3
+through 15:
 
 - **`0`**: `STDIN_FILENO` (Standard Input stream)
 - **`1`**: `STDOUT_FILENO` (Standard Output serial console)
@@ -51,9 +100,12 @@ Per-process file descriptor tables (`fd_table[16]`) allocate standard I/O Stream
 
 ---
 
-## 4. Virtual Address Space Layout & Privilege Boundaries
+## 5. Virtual Address Space Layout & Privilege Boundaries
 
-Omega enforces strict privilege separation between Kernel Space and Userland Address Space:
+Omega reserves separate kernel and user virtual-address regions. The x86_64
+process foundation currently creates isolated roots and dedicated user PML4
+slots; native Ring 3/EL0/U-Mode execution and a complete hardware-enforced
+userspace boundary remain future work:
 
 ```text
 +-------------------------------------------------------+ 0xFFFFFFFFFFFFFFFF
@@ -70,6 +122,7 @@ Omega enforces strict privilege separation between Kernel Space and Userland Add
 |                                                       |
 |  - User Stack (Top of Userland Space)                 |
 |  - Dynamic Heap / Mmap Region                         |
+|    Anonymous mmap bring-up base: 0x400000000000       |
 |  - ELF BSS / Data Segments                            |
 |  - ELF Code Segment (.text - Base 0x400000)           |
 |                                                       |
@@ -78,7 +131,7 @@ Omega enforces strict privilege separation between Kernel Space and Userland Add
 
 ---
 
-## 5. Primitive Data Types & Alignment Specifications
+## 6. Primitive Data Types & Alignment Specifications
 
 | Type | Bit Width | Byte Alignment | Architectural Representation |
 | :--- | :---: | :---: | :--- |
@@ -89,3 +142,58 @@ Omega enforces strict privilege separation between Kernel Space and Userland Add
 | `long long` | 64-bit | 8-byte | Signed 64-bit Integer |
 | `pointer` (`void*`) | 64-bit | 8-byte | Unsigned 64-bit Virtual Address |
 | `size_t` | 64-bit | 8-byte | Unsigned 64-bit Byte Count |
+
+## 7. Omega SDK Linux Artifact ABI
+
+Omega consumes standard little-endian ELF64 artifacts for the matching
+architecture. Compatibility is defined at three different layers:
+
+| Artifact | Compatibility contract | Current status |
+| :--- | :--- | :--- |
+| Static library (`.a`) | Archive members must be ELF relocatable objects for the target ISA, use the target Linux psABI, and expose C/C++ symbols that the Omega SDK linker can resolve. A host Linux `.a` is not executable by itself. | **Link-time compatible when rebuilt/linked with the Omega SDK** |
+| Executable (`ET_EXEC`/static `ET_DYN`) | ELF64, little-endian, matching `e_machine`, valid `PT_LOAD` ranges, no `PT_INTERP`, no unresolved dynamic metadata, and the Linux syscall/psABI contract above. | **Bounded format validation implemented; segment mapping and full userspace execution pending** |
+| Shared object (`ET_DYN`/`.so`) | Position-independent code, ELF relocations, symbol/version resolution, `DT_NEEDED` dependency loading, and an Omega dynamic linker/loader are required. | **Not runnable yet; ABI reserved and explicitly rejected by the current loader** |
+
+### Static libraries
+
+A Linux-built static archive can be used as an Omega link input only when its
+objects match the selected Omega target (`x86_64`, `AArch64`, or `RV64`), use
+the corresponding System V AMD64, AAPCS64, or RISC-V psABI, and do not depend
+on unavailable host services. The archive must be linked against an Omega
+CRT/libc and Omega syscall stubs; glibc startup objects and glibc symbol
+versions are not ABI-compatible with Omega.
+
+### Executables
+
+The first supported binary interchange target is a statically linked Linux
+ELF64 executable rebuilt for the Omega SDK syscall ABI. The current loader validates
+headers and program-header safety only when an image size is supplied. It does not yet map segments into an
+active userspace process, apply relocations, establish a Linux-compatible
+auxiliary vector, or enter a real userspace trap frame. Therefore a validated
+executable is not yet automatically runnable.
+
+### Shared objects and dynamic linking
+
+`.so` compatibility requires a dynamic linker and a stable userspace runtime.
+Omega currently rejects `PT_INTERP` and unresolved `PT_DYNAMIC` images rather
+than silently loading them with incorrect semantics. The planned dynamic ABI
+includes ELF symbol lookup, REL/RELA relocation processing, TLS, `DT_NEEDED`,
+symbol versioning, `ld.so`-style initialization/finalization, and `dlopen`/
+`dlsym` behavior.
+
+### Cross-architecture build contract
+
+Linux-produced artifacts must be built separately per target ISA; a Linux
+x86_64 object cannot be reused as an AArch64 or RV64 object. The compatibility
+matrix is:
+
+| Omega target | ELF `e_machine` | psABI | Syscall register |
+| :--- | :---: | :--- | :--- |
+| x86_64 | `EM_X86_64` (`62`) | System V AMD64 | `RAX`, args `RDI`–`R9` |
+| AArch64 | `EM_AARCH64` (`183`) | AAPCS64 | `X8`, args `X0`–`X5` |
+| RISC-V 64 | `EM_RISCV` (`243`) | RISC-V ELF psABI | `A7`, args `A0`–`A5` |
+
+The compatibility boundary is intentionally narrower than “any Linux
+binary”: glibc/musl versioned symbols, Linux-specific `ioctl` values, vDSO,
+procfs/sysfs, namespaces, cgroups, signals, and kernel modules require
+dedicated Omega implementations.

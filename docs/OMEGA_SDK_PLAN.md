@@ -1,0 +1,482 @@
+# Omega SDK Implementation Plan
+
+## 1. Purpose and Compatibility Position
+
+The Omega SDK is the lightweight application-development layer for building
+programs that run on Omega. It must support C and C++ applications on all
+three target ISAs while preserving the Linux-compatible syscall and psABI
+contracts defined in [`ABI.md`](ABI.md).
+
+The SDK is not a copy of a complete Linux distribution. Its first release
+should provide a small, deterministic Omega SDK runtime with:
+
+- C11/C17 application support;
+- a practical C++20 SDK subset;
+- a small POSIX/Linux-shaped libc surface;
+- static ELF64 executables as the primary deployment format;
+- one SDK sysroot per target architecture;
+- reproducible cross-compilation from Linux and macOS hosts;
+- no dependency on glibc, host headers, host startup files, or host dynamic
+  loaders.
+
+The first compatibility target is **source and link compatibility for small
+Linux-style applications**, not arbitrary Linux binary compatibility. Existing
+Linux applications must be rebuilt against the Omega sysroot and Omega CRT.
+
+## 2. Non-Goals for SDK v1
+
+The following are deliberately deferred:
+
+- running glibc-linked Linux binaries unchanged;
+- loading arbitrary `.so` files;
+- full GNU libc coverage;
+- full GNU libstdc++ coverage;
+- exceptions, RTTI, thread-local storage, and dynamic loading in the first
+  C++ profile;
+- kernel headers as a public application interface;
+- Linux kernel-module compatibility;
+- Android NDK or ART compatibility;
+- source-level compatibility with every Linux ioctl, procfs, sysfs, namespace,
+  cgroup, signal, or epoll extension.
+
+## 3. SDK Compatibility Tiers
+
+The SDK should expose explicit profiles instead of one ambiguous “compatible”
+mode.
+
+| Profile | Intended use | Runtime | Status target |
+| :--- | :--- | :--- | :--- |
+| `omega-c` | Small tools, init, tests, embedded-style services | Omega CRT + `libomega-c` | v1 |
+| `omega-cpp` | C++ services without exceptions/RTTI | Omega CRT + `libomega-c` + `libomega-cpp` | v1 |
+| `posix-static` | Linux-shaped command-line applications | Omega libc subset + static linker | v1.x |
+| `posix-dynamic` | Shared libraries and `dlopen` applications | Omega `ld.so`-style dynamic linker | Later |
+| `linux-source-compat` | Rebuilt portable Linux applications | Compatibility headers and libc shims | Progressive |
+
+Every produced artifact should contain an SDK metadata note or sidecar
+manifest recording target ISA, ABI profile, SDK version, syscall ABI version,
+link mode, and required runtime features.
+
+## 4. Supported Target Matrix
+
+| Target triple | ELF machine | C calling convention | C++ ABI baseline | Required ISA policy |
+| :--- | :---: | :--- | :--- | :--- |
+| `x86_64-omega` | `EM_X86_64` (`62`) | System V AMD64 | Itanium C++ ABI with LLVM ABI behavior | SSE2 baseline; no red zone in kernel, normal user red zone allowed if supported |
+| `aarch64-omega` | `EM_AARCH64` (`183`) | AAPCS64 | Itanium C++ ABI with LLVM ABI behavior | ARMv8-A baseline, soft-float policy decided before SDK v1 freeze |
+| `riscv64-omega` | `EM_RISCV` (`243`) | RISC-V ELF psABI | Itanium C++ ABI with LLVM ABI behavior | RV64GC, `lp64d` initially; vector extension optional later |
+
+The SDK must never silently mix objects from different targets. Archive and
+object metadata checks should reject an incompatible `e_machine`, ABI,
+endianness, pointer width, or floating-point ABI before linking.
+
+## 5. Compiler Toolchain
+
+### 5.1 Compiler choice
+
+Use LLVM/Clang as the supported compiler family for v1:
+
+- `clang` for C;
+- `clang++` for C++;
+- `llvm-ar` for static archives;
+- `llvm-ranlib` for archive indexes;
+- `llvm-objcopy` and `llvm-readelf` for artifact inspection;
+- `ld.lld` for linking;
+- `llvm-dwarfdump`/`llvm-addr2line` for debugging.
+
+GCC support should remain a compatibility goal, not a v1 build dependency.
+The public SDK must not depend on GCC-specific headers or libstdc++ internals.
+
+### 5.2 Target flags
+
+The SDK must provide wrapper commands or CMake toolchain files so users do not
+have to memorize target flags.
+
+Representative profiles:
+
+```text
+x86_64:
+  --target=x86_64-unknown-none-elf
+  -march=x86-64 -mno-red-zone
+
+AArch64:
+  --target=aarch64-unknown-none-elf
+  -march=armv8-a
+
+RISC-V 64:
+  --target=riscv64-unknown-none-elf
+  -march=rv64gc -mabi=lp64d -mcmodel=medany
+```
+
+User applications must have a separately defined red-zone, code model,
+floating-point, and TLS policy. Kernel flags must never leak into application
+builds automatically.
+
+### 5.3 Host support
+
+The SDK should work from:
+
+- Linux x86_64 hosts;
+- Linux AArch64 hosts;
+- macOS Apple Silicon hosts;
+- the existing Omega DevContainer/Docker image.
+
+Host tools must be selected by capability detection, while target tools must
+be selected by explicit target profile. A host compiler must not accidentally
+produce a host executable.
+
+## 6. Sysroot and Repository Layout
+
+The installed SDK should use a conventional sysroot:
+
+```text
+sdk/
+├── bin/
+│   ├── omega-clang
+│   ├── omega-clang++
+│   ├── omega-ar
+│   └── omega-ld
+├── cmake/
+│   ├── omega-x86_64.cmake
+│   ├── omega-aarch64.cmake
+│   └── omega-riscv64.cmake
+├── targets/
+│   ├── x86_64-omega/
+│   │   ├── include/
+│   │   ├── lib/crt0.o
+│   │   ├── lib/libomega-c.a
+│   │   ├── lib/libomega-cpp.a
+│   │   └── lib/omega-user.ld
+│   ├── aarch64-omega/
+│   └── riscv64-omega/
+├── include/
+│   ├── omega/
+│   ├── sys/
+│   ├── bits/
+│   └── c++/v1/
+├── share/
+│   ├── abi/
+│   ├── cmake/
+│   └── manifests/
+└── VERSION
+```
+
+The sysroot must be relocatable. Headers and libraries must not embed the
+developer's checkout path.
+
+## 7. C Runtime and libc Strategy
+
+### 7.1 CRT startup
+
+Provide one architecture-specific `crt0` per target. It must:
+
+1. receive the initial process stack;
+2. parse `argc`, `argv`, `envp`, and the auxiliary vector;
+3. establish the Omega libc runtime state;
+4. call `main`;
+5. call `exit` with the return value;
+6. never return into an undefined kernel frame.
+
+The startup ABI should follow Linux process conventions where practical:
+`argc`, `argv`, `envp`, `auxv`, stack alignment, and `AT_*` values should be
+documented and tested per architecture.
+
+### 7.2 libc implementation options
+
+Evaluate two approaches:
+
+| Option | Benefit | Cost | Recommendation |
+| :--- | :--- | :--- | :--- |
+| Port a small musl subset | Strong POSIX behavior and familiar interfaces | Porting effort, upstream assumptions, larger maintenance surface | Preferred for `posix-static` |
+| Build `libomega-c` directly | Minimal footprint and full control | More libc behavior must be implemented locally | Required bootstrap layer |
+
+Recommended sequence:
+
+1. implement `libomega-c` for startup, memory, strings, stdio, errno,
+   allocation, process, file, and time primitives;
+2. define compatibility shims matching musl/POSIX signatures;
+3. port selected musl components once Omega has stable memory, file,
+   process, and signal semantics;
+4. keep the public headers independent of implementation choice.
+
+### 7.3 Initial C API
+
+The first supported headers should include:
+
+- `<stddef.h>`, `<stdint.h>`, `<stdbool.h>`, `<stdarg.h>`;
+- `<errno.h>`, `<limits.h>`, `<stdint.h>`;
+- `<string.h>`, `<stdlib.h>`, `<stdio.h>`;
+- `<unistd.h>` for `read`, `write`, `close`, `brk`, and `sched_yield`;
+- `<fcntl.h>`, `<sys/types.h>`, `<sys/stat.h>`;
+- `<sys/mman.h>` for `mmap`/`munmap` constants and prototypes;
+- `<pwd.h>` and `<grp.h>` after users/group databases exist;
+- `<time.h>` once the clock ABI is stable.
+
+Each function must have an explicit support status. Unsupported calls should
+return the documented Linux errno rather than silently succeeding.
+
+## 8. C++ Runtime Strategy
+
+### 8.1 C++ language profile
+
+The v1 C++ profile should support:
+
+- C++17 or C++20 language syntax selected by the compiler;
+- templates, constexpr, type traits, and standard containers;
+- `new`/`delete` backed by Omega allocation;
+- `<cstdint>`, `<cstddef>`, `<type_traits>`, `<utility>`, `<array>`,
+  `<string_view>`, and selected `<algorithm>` facilities;
+- `std::span` and other header-only facilities where practical.
+
+The initial profile should compile with:
+
+```text
+-fno-exceptions -fno-rtti -fno-threadsafe-statics
+-fno-use-cxa-atexit -nostdinc++
+```
+
+### 8.2 Standard library choice
+
+Use LLVM libc++ headers only after removing or replacing facilities that
+require unavailable runtime support. Provide `libomega-cpp.a` containing:
+
+- `operator new`/`operator delete`;
+- pure virtual function handlers;
+- guard-variable support if static initialization is enabled;
+- minimal `__cxa_*` functions required by selected compiler output;
+- `std::terminate` and abort behavior;
+- optional no-op locale/iostream exclusions.
+
+Do not promise full libc++ or libstdc++ binary compatibility in v1. C++ ABI
+compatibility requires matching compiler major behavior, name mangling,
+exception model, standard-library layout, and allocation ownership. C++ SDK
+libraries should therefore be rebuilt with the same Omega toolchain.
+
+### 8.3 C/C++ interoperability
+
+The SDK must publish stable C interfaces for syscalls and runtime services.
+C++ wrappers may be header-only or versioned libraries, but all cross-language
+entry points must use `extern "C"` and fixed-width types. No C++ standard
+library object may cross a shared-library or IPC boundary in v1.
+
+## 9. Link and Artifact Policy
+
+### 9.1 Static executables
+
+The primary v1 artifact is a static ELF64 executable:
+
+- `ET_EXEC` initially, with static `ET_DYN`/PIE after relocation support;
+- matching target `e_machine`;
+- little-endian ELF64;
+- `PT_LOAD` segments with W^X-compatible flags;
+- no `PT_INTERP`;
+- no unresolved `DT_NEEDED` dependencies;
+- Omega CRT, libc, and syscall stubs linked into the image.
+
+The SDK should expose:
+
+```bash
+omega-clang app.c -o app
+omega-clang++ app.cpp -o app
+omega-size app
+omega-check-elf app
+```
+
+`omega-check-elf` must reject wrong-ISA objects, dynamic interpreters,
+unsupported relocations, text relocations, and unresolved runtime symbols.
+
+### 9.2 Static libraries
+
+`.a` archives are link-time artifacts, not runnable programs. The SDK should
+provide archive inspection:
+
+```bash
+omega-ar rcs libwidget.a widget.o
+omega-check-archive --target=x86_64-omega libwidget.a
+```
+
+The checker should verify every member's architecture, ELF class, ABI flags,
+relocation class, and public symbol metadata.
+
+### 9.3 Shared objects
+
+Shared objects require a later dynamic ABI milestone:
+
+- `ET_DYN` output and PIC code;
+- REL/RELA relocation processing per ISA;
+- symbol lookup and weak symbols;
+- `DT_NEEDED` dependency graph;
+- symbol versioning policy;
+- TLS model;
+- constructor/destructor arrays;
+- `dlopen`, `dlsym`, and `dlclose`.
+
+Until then, the SDK must fail clearly when asked to create or run a dynamic
+artifact rather than producing an image Omega cannot execute.
+
+## 10. Syscall and Runtime Wrapper Design
+
+All libc wrappers must use the architecture-native Linux register convention
+and syscall number table from `ABI.md`. The implementation should centralize
+this in one assembly or compiler-inline layer per ISA:
+
+```text
+libomega-c API
+    ↓
+errno-preserving syscall wrapper
+    ↓
+x86_64 syscall / AArch64 svc #0 / RV64 ecall
+    ↓
+Omega syscall ABI
+```
+
+Wrappers must:
+
+- convert negative kernel returns into `errno` and `-1` where POSIX requires;
+- preserve caller-saved and callee-saved registers according to the psABI;
+- pass 64-bit offsets and sizes without host `long` assumptions;
+- support six arguments;
+- avoid direct access to kernel symbols or memory;
+- provide compile-time assertions for type widths and structure layouts.
+
+## 11. Threading and Parallel Processing
+
+The SDK should expose `pthread` only after Omega has process/thread identity,
+TLS, blocking primitives, and robust scheduler semantics. The initial profile
+may provide:
+
+- `pthread_t` as a fixed-width opaque handle;
+- `pthread_create`, `pthread_join`, and `pthread_exit`;
+- mutexes and condition variables built on Omega futex-like primitives;
+- a documented single-process fallback where SMP is unavailable.
+
+`std::thread` must not be advertised until the pthread layer and C++ runtime
+are stable. Parallel execution must use the same ABI on all ISAs; only the
+architecture-specific trap, timer, and context-switch implementation differs.
+
+## 12. Packaging and Deployment
+
+Each application release should contain:
+
+```text
+app-package/
+├── manifest.json
+├── bin/app
+├── lib/                 # empty for static v1 applications
+├── etc/
+└── debug/
+```
+
+The manifest must include:
+
+- package name/version;
+- target ISA and minimum Omega ABI version;
+- required syscall and runtime feature set;
+- entry path;
+- requested permissions;
+- UID/GID or sandbox policy;
+- SHA-256 digests of all artifacts.
+
+The initrd/application packer must reject wrong-ISA binaries and binaries
+with unsupported dynamic requirements.
+
+## 13. Verification Plan
+
+### Host unit tests
+
+- target triple and ABI metadata checks;
+- archive member validation;
+- ELF header, `PT_LOAD`, relocation, and interpreter checks;
+- C ABI type-size and structure-layout assertions;
+- C++ `new`/`delete` and runtime symbol tests;
+- syscall wrapper errno conversion tests;
+- package manifest and digest tests.
+
+### QEMU integration tests
+
+For every ISA:
+
+1. boot the kernel with an Omega static executable in the initrd;
+2. verify `argc`, `argv`, `envp`, and `auxv` setup;
+3. execute `write`, `mmap`, `munmap`, `brk`, UID/GID, and file-permission
+   calls;
+4. verify a denied permission returns the expected errno;
+5. run a C++ program using `new`, containers, and C wrappers;
+6. verify process exit status and crash reporting;
+7. reject a wrong-ISA executable and a dynamic `PT_INTERP` executable.
+
+### Compatibility matrix
+
+CI should build and test each profile independently:
+
+| Profile | x86_64 | AArch64 | RV64 |
+| :--- | :---: | :---: | :---: |
+| `omega-c` | required | required | required |
+| `omega-cpp` | required | required | required |
+| `posix-static` | required | required | required |
+| `posix-dynamic` | later | later | later |
+
+## 14. Milestones
+
+### SDK-0: Contract and toolchain
+
+- freeze target triples, psABI assumptions, compiler versions, and sysroot
+  layout;
+- add CMake toolchain files and `omega-*` wrapper command design;
+- add ELF/archive metadata checker.
+
+### SDK-1: Omega C SDK
+
+- implement `crt0`, `libomega-c`, syscall wrappers, `errno`, allocator,
+  strings, stdio, files, memory mapping, and process exit;
+- run one static C program on all three QEMU targets.
+
+### SDK-2: Omega C++ SDK
+
+- add `libomega-cpp`, libc++ subset, allocation/runtime support, and C++ ABI
+  tests;
+- run one C++ program using containers and C interop on all targets.
+
+### SDK-3: POSIX static profile
+
+- add passwd/group/mode APIs, environment handling, time, signals, pthread
+  subset, and application packaging;
+- build a small shell and file utility set.
+
+### SDK-4: Dynamic runtime
+
+- implement relocations, dynamic linker, shared objects, TLS, symbol versions,
+  and `dlopen` family APIs;
+- validate only after static execution and process isolation are stable.
+
+### SDK-5: Linux source compatibility
+
+- port selected musl components;
+- add compatibility headers and feature-test macros;
+- compile representative Linux utilities without source changes where
+  practical;
+- publish a documented unsupported-feature list.
+
+## 15. Risks and Design Rules
+
+- Do not claim binary compatibility from source compatibility alone.
+- Do not link host glibc or libstdc++ into Omega applications.
+- Do not let C++ ABI objects cross versioned package or IPC boundaries.
+- Keep syscall numbers and structure layouts versioned and testable.
+- Prefer static linking until dynamic-loader semantics are complete.
+- Reject unsupported artifacts early with actionable diagnostics.
+- Keep the SDK independent of kernel-private headers.
+- Require the same test application to pass on x86_64, AArch64, and RV64.
+
+## 16. Exit Criteria for SDK v1
+
+SDK v1 is complete when:
+
+- C and Omega SDK C++ applications build from Linux and macOS hosts;
+- one static C and one static C++ application run on every target ISA;
+- syscall wrappers, errno, UID/GID, file permissions, and memory APIs behave
+  consistently across all targets;
+- `.a` archive validation rejects wrong-architecture inputs;
+- executable validation rejects wrong-architecture and dynamic-interpreter
+  images;
+- application manifests and initrd packaging are reproducible;
+- the supported API, unsupported API, and ABI version are documented;
+- CI runs the complete matrix for every SDK release.

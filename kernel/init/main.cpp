@@ -19,6 +19,8 @@
 #include "kernel/storage.hpp"
 #include "kernel/virtio_blk.hpp"
 #include "kernel/ext4.hpp"
+#include "kernel/process.hpp"
+#include "kernel/security.hpp"
 
 // Static Heap Allocation Buffer (1 MB) to guarantee physical memory availability across architectures
 static uint8_t kernel_heap_buffer[1024 * 1024] __attribute__((aligned(8)));
@@ -26,11 +28,57 @@ static uint8_t kernel_heap_buffer[1024 * 1024] __attribute__((aligned(8)));
 static uint8_t pmm_bitmap_buffer[4096] __attribute__((aligned(4096)));
 #endif
 
+#if defined(OMEGA_ENABLE_SCHEDULER_SELF_TEST) && defined(__x86_64__)
+static volatile uint32_t scheduler_test_a = 0;
+static volatile uint32_t scheduler_test_b = 0;
+static volatile bool scheduler_test_yield_seen = false;
+static volatile bool scheduler_test_preempt_logged = false;
+static volatile bool scheduler_test_context_logged = false;
+static volatile bool scheduler_test_tick_logged = false;
+
+static void scheduler_test_thread_a() {
+    for (;;) {
+        scheduler_test_a = scheduler_test_a + 1;
+        if (scheduler_test_a == 1) {
+            scheduler::Scheduler::yield();
+            scheduler_test_yield_seen = true;
+        }
+        if (!scheduler_test_preempt_logged && scheduler_test_a >= 5 && scheduler_test_b >= 5 && scheduler_test_yield_seen) {
+            scheduler_test_preempt_logged = true;
+            kernel::kprintf("[TEST][PASS] PIT timer preempted two kernel threads\n");
+        }
+        if (!scheduler_test_tick_logged && scheduler::Scheduler::tick_count() >= 20) {
+            scheduler_test_tick_logged = true;
+            kernel::kprintf("[TEST][PASS] Timer tick rate observed (%u ticks)\n",
+                            static_cast<uint32_t>(scheduler::Scheduler::tick_count()));
+        }
+        asm volatile("hlt");
+    }
+}
+
+static void scheduler_test_thread_b() {
+    for (;;) {
+        scheduler_test_b = scheduler_test_b + 1;
+        if (!scheduler_test_context_logged && scheduler_test_a >= 5 && scheduler_test_b >= 5 && scheduler_test_yield_seen) {
+            scheduler_test_context_logged = true;
+            kernel::kprintf("[TEST][PASS] Timer context-switch state preserved\n");
+        }
+        asm volatile("hlt");
+    }
+}
+#endif
+
 // Synthetic Minimal ELF Header for Testing
 static const uint8_t mock_elf_binary[] __attribute__((aligned(8))) = {
     0x7F, 'E', 'L', 'F', 2, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, // e_ident (64-bit)
     2, 0,                                                   // e_type (EXEC)
+#if defined(__x86_64__)
     62, 0,                                                  // e_machine (x86_64)
+#elif defined(__aarch64__)
+    183, 0,                                                 // e_machine (AArch64)
+#else
+    243, 0,                                                 // e_machine (RISC-V)
+#endif
     1, 0, 0, 0,                                             // e_version
     0x00, 0x10, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,         // e_entry (0x401000)
     0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,         // e_phoff (64)
@@ -46,8 +94,8 @@ static const uint8_t mock_elf_binary[] __attribute__((aligned(8))) = {
     0, 0, 0, 0, 0, 0, 0, 0,                                 // p_offset
     0x00, 0x10, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,         // p_vaddr (0x401000)
     0x00, 0x10, 0x40, 0x00, 0x00, 0x00, 0x00, 0x00,         // p_paddr
-    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,         // p_filesz (128B)
-    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,         // p_memsz (128B)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,         // p_filesz (empty synthetic payload)
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,         // p_memsz (empty synthetic payload)
     0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00          // p_align (4KiB)
 };
 
@@ -115,6 +163,16 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
     // Initialize Heap Allocator using static kernel heap buffer
     memory::HeapAllocator::init(reinterpret_cast<uintptr_t>(kernel_heap_buffer), sizeof(kernel_heap_buffer));
 
+    security::Manager::init();
+    if (security::Manager::self_test() == 0) {
+        kernel::kprintf("[TEST][PASS] Linux UID/GID/group and mode permission matrix\n");
+    }
+
+    process::Manager::init();
+    if (process::Manager::self_test() == 0) {
+        kernel::kprintf("[TEST][PASS] Process address-space map/unmap path\n");
+    }
+
     // Initialize the common storage layer before hardware drivers and VFS
     // mounts. The memory-backed device validates the request/lifecycle API.
     storage::Manager::init();
@@ -131,6 +189,13 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
 
     // Initialize Preemptive Thread Scheduler
     scheduler::Scheduler::init();
+#if defined(__x86_64__)
+    hal::timer_init(100);
+#if defined(OMEGA_ENABLE_SCHEDULER_SELF_TEST)
+    scheduler::Scheduler::create_thread(scheduler_test_thread_a);
+    scheduler::Scheduler::create_thread(scheduler_test_thread_b);
+#endif
+#endif
 
     // Initialize System Call Engine & POSIX Surface
     syscall::SyscallDispatcher::init();
@@ -154,14 +219,22 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
     userland::UserlandManager::init();
 
     // Parse and Load ELF Binary
-    uintptr_t elf_entry = elf::ElfLoader::load(mock_elf_binary);
+    uintptr_t elf_entry = elf::ElfLoader::load(mock_elf_binary, sizeof(mock_elf_binary));
     if (elf_entry) {
         kernel::kprintf("[+] ELF Executable Binary Successfully Parsed & Loaded!\n");
     }
 
     kernel::kprintf("[+] System online. Entering idle loop...\n");
 
+#if defined(__x86_64__)
+    hal::interrupts_enable();
+#endif
+
     while (1) {
-        // CPU Halt loop
+        // The x86 PIT drives timer_tick() while the idle thread sleeps.
+        // Other architectures retain their existing bring-up idle behavior.
+#if defined(__x86_64__)
+        asm volatile("hlt");
+#endif
     }
 }

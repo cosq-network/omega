@@ -7,6 +7,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 option(ARCH "Target Architecture (x86_64, aarch64, riscv64)" "x86_64")
 option(ENABLE_EXPERIMENTAL_VIRTIO_GPU "Enable the in-kernel VirtIO-GPU MMIO bring-up path" OFF)
 option(ENABLE_EXPERIMENTAL_VIRTIO_BLOCK "Enable the in-kernel VirtIO-Block MMIO bring-up path" OFF)
+option(ENABLE_SCHEDULER_SELF_TEST "Run the x86_64 timer/context-switch self-test" OFF)
 message(STATUS "Configuring Omega Kernel for Architecture: ${ARCH}")
 
 find_program(LLD_PATH ld.lld PATHS /opt/homebrew/bin /usr/local/bin)
@@ -40,6 +41,8 @@ set(KERNEL_SOURCES
     kernel/sys/vmm.cpp
     kernel/sys/heap.cpp
     kernel/sys/scheduler.cpp
+    kernel/sys/process.cpp
+    kernel/sys/security.cpp
     kernel/sys/syscall.cpp
     kernel/sys/vfs.cpp
     kernel/sys/ext4.cpp
@@ -66,6 +69,8 @@ if(ARCH STREQUAL "x86_64")
         kernel/arch/x86_64/boot.s
         kernel/arch/x86_64/serial.cpp
         kernel/arch/x86_64/idt.cpp
+        kernel/arch/x86_64/timer.cpp
+        kernel/arch/x86_64/timer.s
         kernel/arch/x86_64/pci.cpp
         kernel/arch/x86_64/vga_regs.cpp
         kernel/arch/x86_64/vga_text.cpp
@@ -98,6 +103,11 @@ else()
 endif()
 
 add_compile_options(${FREESTANDING_FLAGS})
+if(ARCH STREQUAL "x86_64")
+    # Interrupts may arrive between instructions; kernel code must not use the
+    # user-space red zone below RSP.
+    add_compile_options(-mno-red-zone)
+endif()
 
 add_library(kernel_objs OBJECT ${KERNEL_SOURCES})
 
@@ -106,6 +116,9 @@ if(ENABLE_EXPERIMENTAL_VIRTIO_GPU)
 endif()
 if(ENABLE_EXPERIMENTAL_VIRTIO_BLOCK)
     target_compile_definitions(kernel_objs PRIVATE OMEGA_ENABLE_EXPERIMENTAL_VIRTIO_BLOCK=1)
+endif()
+if(ENABLE_SCHEDULER_SELF_TEST)
+    target_compile_definitions(kernel_objs PRIVATE OMEGA_ENABLE_SCHEDULER_SELF_TEST=1)
 endif()
 
 add_custom_target(omega.elf ALL

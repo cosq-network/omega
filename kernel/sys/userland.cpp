@@ -2,9 +2,13 @@
 #include "kernel/kprint.hpp"
 
 extern "C" void jump_to_userland(uintptr_t user_entry, uintptr_t user_stack) {
+    // A C++ call is not a privilege transition: it would execute an
+    // untrusted entry point in the kernel address space.  Architecture
+    // specific EL0/Ring-3 entry is enabled only once its trap frame, user
+    // selectors, and address-space activation are installed.
+    (void)user_entry;
     (void)user_stack;
-    auto fn = reinterpret_cast<void(*)()>(user_entry);
-    fn();
+    kernel::kprintf("[!] Userland entry rejected: native privilege transition is not installed.\n");
 }
 
 namespace userland {
