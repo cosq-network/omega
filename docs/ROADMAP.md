@@ -5,6 +5,25 @@ This document outlines the multi-phase implementation roadmap for **Omega**—a 
 
 Phases **1–6** cover the research-kernel foundation (completed). Phases **7–12** describe the realistic path from QEMU-proven subsystems to a **production-grade operating system** suitable for laptops, desktops, tablets, and phones.
 
+### Architecture maturity baseline
+
+Omega currently has a functional bring-up baseline on all three target ISAs,
+but the architecture implementations are not yet equivalent to Linux-class
+platform support. The roadmap therefore treats each ISA as an explicit
+platform track rather than assuming that a driver or subsystem is portable
+after it works on one architecture.
+
+| Architecture | Current Omega baseline | Main gap to close | Near-term priority |
+| :--- | :--- | :--- | :---: |
+| **x86_64** | Long-mode boot, PML4 paging, GDT/IDT, PCI, VGA/Bochs VBE, serial, early VirtIO, QEMU `q35`/`pc` | ACPI, APIC/x2APIC, timers, SMP, UEFI/GOP, MSI/MSI-X, IOMMU, mature PCIe/NVMe/USB/network drivers | **P0** |
+| **AArch64** | EL transition, vectors, UART, GIC foundation, FDT, SimpleFb, QEMU `virt`, experimental VirtIO-MMIO | PSCI, GICv3, generic timer, SMP, cache/MMU attributes, ACPI/UEFI, SMMU, board/SoC drivers | **P0** |
+| **RISC-V 64** | OpenSBI S-mode entry, Sv39, `stvec`, PLIC foundation, UART, FDT, SimpleFb, QEMU `virt` | SBI HSM/CPU management, timer/IPI, APLIC/IMSIC evolution, SMP, Sv48, PMP, vector support, board drivers | **P1** |
+
+The target is not to reproduce Linux’s full hardware matrix immediately. The
+first production-quality milestone is a documented reference platform for each
+ISA with reliable boot, memory isolation, interrupts, timers, SMP, storage,
+networking, display, input, recovery, and a stable userspace ABI.
+
 ---
 
 ## 🚦 Phase Completion Matrix (Phases 1–6)
@@ -80,6 +99,63 @@ Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsys
 | **Phase 7.6: IPC Foundation** | `PLANNED` | Inter-process communication for microkernel services | Message passing, capability tokens, shared-memory grants | Driver server ↔ client round-trip |
 
 **Exit criteria:** Omega boots in QEMU with block storage, **graphical console on x86_64 (done)**, SMP, preemptive scheduling, process isolation, and a userspace driver server communicating over IPC.
+
+### Phase 7 Architecture Tracks
+
+These tracks make the shared kernel services usable on real multicore
+platforms. Each item requires a host unit test where possible, a QEMU
+integration test, and a documented failure/recovery path before being marked
+complete.
+
+#### 7.A x86_64 platform maturity — P0
+
+| Milestone | Status | Deliverable | Verification |
+| :--- | :---: | :--- | :--- |
+| **7.A.1 ACPI and firmware handoff** | `PLANNED` | Parse RSDP/RSDT/XSDT, MADT, FADT, HPET, MCFG, and memory maps from UEFI/BIOS handoff | QEMU `q35` ACPI table dump and malformed-table tests |
+| **7.A.2 APIC and MSI interrupt routing** | `PLANNED` | Local APIC, I/O APIC, x2APIC capability detection, MSI/MSI-X routing, interrupt affinity | Timer, PCI, and cross-core interrupt tests |
+| **7.A.3 Timers and timekeeping** | `PLANNED` | TSC calibration, HPET/PIT fallback, monotonic clock, timer queues, clocksource selection | Drift, timeout, and preemption tests |
+| **7.A.4 SMP and topology** | `PLANNED` | AP startup, per-CPU data, CPU topology, TLB shootdown, reschedule IPIs | QEMU 2/4/8-vCPU boot and parallel scheduler tests |
+| **7.A.5 UEFI GOP and PCIe** | `PLANNED` | GOP framebuffer handoff, ECAM/MCFG, BAR allocation, bus mastering, hotplug-safe enumeration | OVMF/Q35 framebuffer and PCIe enumeration tests |
+| **7.A.6 x86_64 memory hardening** | `PLANNED` | NX/W^X, PAT/cache attributes, optional five-level paging, guard pages, KASLR prerequisites | Page-permission and fault-injection tests |
+
+#### 7.B AArch64 platform maturity — P0
+
+| Milestone | Status | Deliverable | Verification |
+| :--- | :---: | :--- | :--- |
+| **7.B.1 PSCI and boot protocol** | `PLANNED` | PSCI CPU_ON/OFF, reset, system suspend hooks, UEFI/Device Tree handoff normalization | QEMU `virt` PSCI and reboot tests |
+| **7.B.2 GICv2/GICv3 interrupt framework** | `PARTIAL` | Complete distributor/redistributor setup, priority/routing, SGI/PPI/SPI handling, MSI integration | IRQ storm, timer, and multi-vCPU tests |
+| **7.B.3 ARM generic timer** | `PLANNED` | CNTFRQ/CNTPCT calibration, virtual/physical timer selection, tickless deadline timers | Clock drift and preemption tests |
+| **7.B.4 AArch64 SMP and cache discipline** | `PLANNED` | Per-CPU data, barriers, cache maintenance, TLB invalidation, coherency-safe DMA | QEMU multi-vCPU and DMA consistency tests |
+| **7.B.5 MMU and memory attributes** | `PLANNED` | Permissioned page tables, device-vs-normal memory, shareability, execute-never, 4K/16K page policy | Fault, mapping, and framebuffer attribute tests |
+| **7.B.6 UEFI, ACPI, and board abstraction** | `PLANNED` | ACPI/DT selection, generic board layer, PSCI/GIC/timer resource discovery, SMMU boundary | QEMU `virt`, Raspberry Pi, and first reference-board boot tests |
+
+#### 7.C RISC-V 64 platform maturity — P1
+
+| Milestone | Status | Deliverable | Verification |
+| :--- | :---: | :--- | :--- |
+| **7.C.1 SBI platform services** | `PARTIAL` | SBI version/features, HSM CPU control, timer, IPI, reset, and vendor-extension policy | OpenSBI version matrix and service-failure tests |
+| **7.C.2 Timer and IPI abstraction** | `PLANNED` | ACLINT/CLINT discovery, SBI timer fallback, software interrupts, per-CPU deadlines | Timer/preemption and cross-core IPI tests |
+| **7.C.3 PLIC to AIA evolution** | `PLANNED` | PLIC baseline hardening, APLIC/IMSIC capability model, interrupt domains, MSI delivery | QEMU interrupt-controller matrix |
+| **7.C.4 RISC-V SMP and memory ordering** | `PLANNED` | Hart discovery/startup, per-hart state, fences, TLB shootdown, scheduler IPIs | QEMU multi-hart and concurrency tests |
+| **7.C.5 Virtual-memory and protection expansion** | `PLANNED` | Sv39 hardening, optional Sv48, PMP policy, execute permissions, page-fault path | Mapping, isolation, and PMP fault tests |
+| **7.C.6 ISA feature and board capability model** | `PLANNED` | DT/ACPI probing, ISA extension discovery, vector-state policy, board resource drivers | RV64GC/vector capability tests and reference-board boot |
+
+#### 7.D Shared architecture-neutral kernel services — P0
+
+| Milestone | Status | Deliverable | Verification |
+| :--- | :---: | :--- | :--- |
+| **7.D.1 Timer-independent scheduler core** | `PLANNED` | Architecture-neutral scheduler clock, priorities, accounting, and preemption hooks | Identical scheduler tests on all ISAs |
+| **7.D.2 Per-process address spaces** | `PLANNED` | Isolated page tables, syscall validation, copy-on-write prerequisites, guard regions | Two-process isolation and fault tests |
+| **7.D.3 Capability-based IPC** | `PLANNED` | Typed messages, endpoint ownership, capability transfer, shared-memory grants, timeout/cancellation | Driver-server round-trip and abuse tests |
+| **7.D.4 Portable driver contracts** | `PLANNED` | Common interrupt, DMA, MMIO, block, net, display, and input interfaces | Synthetic drivers plus all-ISA contract tests |
+| **7.D.5 Userspace bootstrap** | `PLANNED` | Init process, process lifecycle, shell over serial, libc bootstrap, stable ABI versioning | End-to-end ELF/init/syscall test |
+
+**Architecture-track exit criteria:** each target boots on its reference QEMU
+machine with validated interrupt delivery, timer-driven preemption, SMP,
+isolated processes, a working storage path, network path, display or serial
+console, and a documented userspace-driver boundary. No architecture is
+considered production-ready solely because it compiles or reaches
+`kernel_main()`.
 
 ### Storage Architecture
 
@@ -488,15 +564,16 @@ Year 4–5      Phase 10C + 11       Phone product, public release, OEM partners
 
 Concrete sequence mapped to the existing codebase:
 
-1. **Complete Phase 7** — add NVMe/AHCI/SDHCI/USB storage drivers, complete **Phase 7.2b display on AArch64/RISC-V** (see `docs/DISPLAY_AARCH64_RISCV_PLAN.md`), and extend VirtIO-MMIO runtime completion beyond x86_64. *(Standard VGA and x86_64 transitional VirtIO-Block completion are validated.)*
-2. **Select first real board** — QEMU `virt` → Raspberry Pi 4/5 → one x86_64 laptop.
-3. **Userspace init process** — Minimal init that spawns a shell over serial (validates ELF loader + syscalls end-to-end).
-4. **IPC + driver framework** — Storage, network, and display as privileged userspace servers.
-5. **Port musl (or minimal libc)** — Expand syscalls to POSIX subset required by libc.
-6. **Extend graphical console** — Scrollback, ANSI colors, userspace compositor path (kernel FB console is in place).
-7. **Freeze v1 ABI** — Document and version the syscall and IPC interfaces (`docs/ABI.md`).
-8. **Extend OVD emulator** — lifecycle management, storage/network profiles, QMP state, snapshots, import/export, GUI controls, x86_64 VirtIO-Block runtime completion, and profile-backed ext4 artifact tests are wired; next add VirtIO-GPU + SimpleFb for AArch64/RISC-V, device hotplug scenarios, and richer QEMU machine capability detection.
-9. **Defer phone work** — Until laptop/tablet daily-driver quality is demonstrated.
+1. **Complete shared Phase 7 services** — timer-driven preemption, per-process address spaces, capability IPC, portable DMA/MMIO contracts, and the userspace init path.
+2. **Finish x86_64 P0 parity** — ACPI, APIC/x2APIC, HPET/TSC, SMP, MSI/MSI-X, UEFI GOP, PCIe ECAM, and hardened memory permissions on QEMU `q35`.
+3. **Finish AArch64 P0 parity** — PSCI, complete GICv3 support, generic timers, SMP, cache/MMU attributes, UEFI/DT normalization, and VirtIO-MMIO completion on QEMU `virt`.
+4. **Advance RISC-V P1 parity** — SBI HSM/timer/IPI services, SMP, PLIC hardening, AIA capability planning, Sv48/PMP preparation, and VirtIO-MMIO completion on QEMU `virt`.
+5. **Complete storage and display reference paths** — NVMe/AHCI/SDHCI/USB layers, ext4 writeback, AArch64/RISC-V VirtIO-GPU, UEFI GOP, and real framebuffer integration. *(Standard VGA and x86_64 transitional VirtIO-Block completion are validated.)*
+6. **Validate one reference board per ISA** — QEMU `q35`/OVMF, QEMU AArch64 `virt`, QEMU RISC-V `virt`, then Raspberry Pi 4/5 and one x86_64 laptop.
+7. **Build the userspace base** — Minimal init, serial shell, libc subset, process tools, filesystem utilities, and a versioned syscall/IPC ABI in `docs/ABI.md`.
+8. **Move drivers behind IPC** — Storage, network, display, input, and USB as capability-scoped userspace servers with measured IPC overhead.
+9. **Keep OVD aligned with kernel maturity** — Add architecture capability gates, live boot matrices, device hotplug scenarios, artifact manifests, and profile readiness checks for each QEMU reference target.
+10. **Defer phone work** — Until x86_64 and AArch64 laptop/tablet reference systems demonstrate reliable boot, storage, networking, display, input, power, recovery, and userspace quality.
 
 ---
 
