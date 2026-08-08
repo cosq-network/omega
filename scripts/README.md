@@ -25,9 +25,9 @@ the toolchain files in `cmake/` and target `x86_64`, `aarch64`, and `riscv64`.
 | `test_display_aarch64.sh` | AArch64 display HAL and serial fallback smoke test | Build output and temporary QEMU logs |
 | `test_storage_unit.sh` | Host-side storage API, write-policy, and partition parser unit tests | `build/storage-tests/` |
 | `test_storage.sh` | Storage unit tests, all-ISA boot tests, x86_64 transitional VirtIO-Block runtime completion, and AArch64/RISC-V VirtIO-Block builds | Build output and temporary QEMU logs |
-| `test_scripts_unit.sh` | Shell syntax, argument validation, dry-run launchers, and script contracts | Temporary files only |
-| `../emulator/test_profile_catalog.sh` | Profile schema/catalog validation, deterministic rendering, and ext4 artifact dry-run checks | Temporary files only |
-| `../emulator/test_profile_ext4_integration.sh` | Profile-backed kernel/image manifest, ext4 image, OVD copy, and launcher integration checks | Temporary build/image/OVD roots |
+| `test_scripts_unit.py` | Python emulator manager, profile, archive, snapshot, readiness, VNC, GUI-import, and dry-run tests | Temporary files only |
+| `../emulator/test_profile_catalog.py` | Python profile schema/catalog and deterministic rendering tests | Temporary files only |
+| `../emulator/test_profile_ext4_integration.py` | Python profile-backed ext4 policy tests | Temporary files only |
 
 These scripts are stateless by design. Named device lifecycle, snapshots,
 QMP state, and GUI controls are provided by [`../emulator/README.md`](../emulator/README.md).
@@ -35,7 +35,7 @@ QMP state, and GUI controls are provided by [`../emulator/README.md`](../emulato
 The profile catalog is tested independently with:
 
 ```sh
-./emulator/test_profile_catalog.sh
+python3 -m unittest emulator.test_profile_catalog
 ```
 
 It does not require QEMU or filesystem-image tooling. Native profile artifact
@@ -139,7 +139,7 @@ drivers remain planned milestones.
 Profile-backed ext4 integration is run independently with:
 
 ```sh
-./emulator/test_profile_ext4_integration.sh
+python3 -m unittest emulator.test_profile_ext4_integration
 ```
 
 It always validates the artifact dry-run contract. If `mke2fs` or `mkfs.ext4`
@@ -159,7 +159,7 @@ and parallel workflows.
 ```
 
 The full suite runs architecture boot checks, display tests, storage tests,
-shell-script unit tests, OVD unit tests, and OVD lifecycle tests. QEMU
+Python emulator unit tests, and OVD lifecycle tests. QEMU
 processes are deliberately terminated after the expected boot markers are
 observed; `Killed: 9` from the shell is therefore expected during these
 bounded idle-loop tests.
@@ -174,16 +174,16 @@ The normal test order is:
 1. Multi-architecture kernel builds and boot assertions.
 2. x86_64 VGA and AArch64 display suites.
 3. Storage unit/integration tests and experimental VirtIO-Block builds.
-4. Shell-script unit tests.
-5. OVD unit, GUI contract, and lifecycle tests.
+4. Python emulator manager and profile unit tests.
+5. OVD Tkinter GUI-import, VNC protocol, and lifecycle tests.
 
 Run a narrow suite while diagnosing failures:
 
 ```sh
-./scripts/test_scripts_unit.sh
+python3 scripts/test_scripts_unit.py
 ./scripts/test_storage.sh
 ./scripts/test_display.sh
-./emulator/test_ovd.sh
+python3 -m emulator.ovd_gui
 ```
 
 `test_disk_images.sh` regenerates disk images and should normally be run with

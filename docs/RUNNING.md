@@ -34,9 +34,9 @@ qemu-system-x86_64 \
 ./scripts/test_display.sh    # Bochs VBE, -device VGA, -vga none fallback
 ./scripts/test.sh            # Full multi-arch suite (includes display tests)
 ./scripts/test_storage.sh    # Storage unit tests, all-ISA tests, and x86 VirtIO-Block completion
-./emulator/test_profile_catalog.sh # OVD profile/default/artifact tests
-./emulator/test_profile_ext4_integration.sh # Profile-backed ext4 integration (tool-aware)
-tclsh emulator/test_ovd_gui.tcl    # Tcl/Tk GUI contract tests
+python3 -m unittest emulator.test_profile_catalog # OVD profile/default/artifact tests
+python3 -m unittest emulator.test_profile_ext4_integration # Profile-backed ext4 policy tests
+python3 -m emulator.ovd_gui             # Built-in tkinter GUI
 ```
 
 ---
@@ -102,24 +102,24 @@ machine/device-tree configuration.
 
 ```bash
 # Create and launch an x86_64 virtual device with Standard VGA
-./emulator/ovd_manager.sh create --name phone --arch x86_64 --ram 1024 --disk 64
-./emulator/ovd_run.sh run --name phone --gpu       # GUI window
-./emulator/ovd_run.sh run --name phone --no-gpu    # headless Bochs VBE
+python3 -m emulator.ovd_cli create --name phone --arch x86_64 --ram 1024 --disk 64
+python3 -m emulator.ovd_cli start --name phone --gpu       # GUI window
+python3 -m emulator.ovd_cli start --name phone --no-gpu    # headless Bochs VBE
 
 # AArch64 / RISC-V — SimpleFb/serial fallback; guarded VirtIO-GPU for --gpu
-./emulator/ovd_manager.sh create --name tablet --arch aarch64 --ram 512 --disk 32
-./emulator/ovd_run.sh run --name tablet --no-gpu
+python3 -m emulator.ovd_cli create --name tablet --arch aarch64 --ram 512 --disk 32
+python3 -m emulator.ovd_cli start --name tablet --no-gpu
 ```
 
 OVD storage profiles select the QEMU transport for `userdata.img`:
 
 ```bash
-./emulator/ovd_run.sh run --name phone --storage virtio --dry-run
-./emulator/ovd_run.sh run --name phone --storage ahci
-./emulator/ovd_run.sh run --name phone --storage usb
-./emulator/ovd_run.sh run --name phone --storage sd
-./emulator/ovd_run.sh run --name phone --storage optical
-./emulator/ovd_run.sh run --name phone --storage none
+python3 -m emulator.ovd_cli start --name phone --storage virtio --dry-run
+python3 -m emulator.ovd_cli start --name phone --storage ahci
+python3 -m emulator.ovd_cli start --name phone --storage usb
+python3 -m emulator.ovd_cli start --name phone --storage sd
+python3 -m emulator.ovd_cli start --name phone --storage optical
+python3 -m emulator.ovd_cli start --name phone --storage none
 ```
 
 New OVDs default to `virtio`: x86_64 uses transitional `virtio-blk-pci` with
@@ -135,15 +135,15 @@ Predefined device profiles are stored in `emulator/profiles/catalog.json` and
 managed through the same CLI and GUI:
 
 ```bash
-./emulator/ovd_manager.sh profiles list
-./emulator/ovd_manager.sh profiles validate
-./emulator/ovd_manager.sh profiles show \
+python3 -m emulator.ovd_cli profiles list
+python3 -m emulator.ovd_cli profiles validate
+python3 -m emulator.ovd_cli profiles show \
   --profile aarch64-virt-development --json
-./emulator/ovd_manager.sh profiles render \
+python3 -m emulator.ovd_cli profiles render \
   --profile riscv64-virt-minimal
-./emulator/ovd_manager.sh profiles artifacts \
+python3 -m emulator.ovd_cli profiles artifacts \
   --profile aarch64-virt-development --dry-run
-./emulator/ovd_manager.sh create-from-profile \
+python3 -m emulator.ovd_cli create-from-profile \
   --profile aarch64-virt-development --name arm-dev
 ```
 
@@ -153,10 +153,10 @@ when the verified artifact changes. Profile catalog image size is authoritative
 and disk overrides must match it. Ext4 creation requires `mke2fs` or
 `mkfs.ext4` and fails closed when unavailable.
 
-Launch the profile-aware Tcl/Tk manager with:
+Launch the profile-aware Python/Tkinter manager with:
 
 ```bash
-./emulator/ovd_gui.tcl
+python3 -m emulator.ovd_gui
 ```
 
 The GUI uses catalog RAM/disk defaults, supports profile inspection and

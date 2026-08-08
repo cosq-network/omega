@@ -1,656 +1,486 @@
 # Omega Virtual Device Emulator
 
-The Omega Virtual Device (OVD) Emulator provides a consistent way to create,
-configure, launch, inspect, test, and remove QEMU-based Omega virtual
-devices. It supports the project’s three target architectures:
+The Omega Virtual Device (OVD) manager is implemented entirely in Python. It
+uses `pathlib`, `tarfile`, `socket`, `subprocess.Popen(shell=False)`, and the
+standard-library `tkinter` GUI. The emulator manager does not require Bash,
+Zsh, Tcl source files, `nc`, `awk`, `sed`, `cp`, `tar`, or shell pipelines.
 
-- `x86_64`
-- `aarch64`
-- `riscv64`
-
-The emulator is intended for kernel development, architecture bring-up,
-storage/display testing, CI, and interactive experimentation. It is not a
-full desktop virtualization product; the QEMU device models and kernel
-drivers are still under active development.
-
-## Quick start
-
-From the repository root:
-
-```sh
-# Create a 1 GiB x86_64 OVD with a 64 MiB VirtIO disk.
-./emulator/ovd_manager.sh create \
-    --name phone \
-    --arch x86_64 \
-    --ram 1024 \
-    --disk 64 \
-    --storage virtio
-
-# Inspect the generated QEMU command without starting QEMU.
-./emulator/ovd_run.sh run --name phone --no-gpu --dry-run
-
-# Launch headless.
-./emulator/ovd_run.sh run --name phone --no-gpu
-
-# Launch in the background.
-./emulator/ovd_manager.sh start --name phone --no-gpu --daemon
-
-# Check and stop it.
-./emulator/ovd_manager.sh status --name phone
-./emulator/ovd_manager.sh stop --name phone
-
-# Remove the OVD after stopping it.
-./emulator/ovd_manager.sh delete --name phone
-```
+QEMU is the optional direct-process backend for running a guest. The manager
+constructs an argument vector and launches it with `shell=False`; it never
+passes the command through a shell. Dry-runs, profile inspection,
+configuration management, archives, and snapshot copies work with Python and
+the standard library alone.
 
 ## Requirements
 
-Required for normal use:
+Python 3.10 or newer is recommended. The GUI additionally requires a Python
+installation that includes Tkinter. QEMU is required only for an actual guest
+launch, and the matching executable must be available on `PATH`:
 
-- Bash 4+;
-- QEMU system binaries:
-  - `qemu-system-x86_64`;
-  - `qemu-system-aarch64`;
-  - `qemu-system-riscv64`;
-- CMake;
-- Clang/LLVM and the Omega architecture toolchains;
-- `make` or a supported CMake build backend.
+| Architecture | QEMU executable |
+| --- | --- |
+| `x86_64` | `qemu-system-x86_64` |
+| `aarch64` | `qemu-system-aarch64` |
+| `riscv64` | `qemu-system-riscv64` |
+| `armv7` | `qemu-system-arm` (conditional board profiles) |
 
-Optional tools:
+The Python manager itself is cross-platform on Windows, Linux, and macOS.
+QEMU display backends and Omega kernel builds remain host prerequisites.
 
-- Tcl/Tk for `ovd_gui.tcl`;
-- `qemu-img` for snapshots and image conversion;
-- `nc` with Unix-socket support for QMP shutdown;
-- `mtools` and `qemu-img` for bootable disk-image workflows.
+## Entry points
 
-The launcher builds the requested kernel automatically if the expected ELF is
-missing. Building in advance usually gives clearer output and faster startup:
-
-```sh
-cmake -S . -B build/x86_64 \
-  -DCMAKE_TOOLCHAIN_FILE=cmake/x86_64-toolchain.cmake \
-  -DARCH=x86_64
-cmake --build build/x86_64
-```
-
-## Real-device profile catalog
-
-The profile catalog is the declarative source for predefined device classes:
+From the repository root:
 
 ```text
-emulator/profiles/catalog.json
-emulator/profiles/schema.json
-emulator/profile_catalog.py
+python3 -m emulator.ovd_cli --help
+python3 -m emulator --help
+python3 -m emulator.ovd_manager --help
+python3 -m emulator.ovd_run run --help
+python3 -m emulator.ovd_gui
 ```
 
-List, inspect, validate, and render profiles without starting QEMU:
+`ovd_manager.py`, `ovd_run.py`, and `profile_catalog.py` can also be executed
+directly with Python. On Windows, use `py -m emulator` or `py -m
+emulator.ovd_gui` when the Python launcher is installed.
 
-```sh
-./emulator/ovd_manager.sh profiles list
-./emulator/ovd_manager.sh profiles list --json
-./emulator/ovd_manager.sh profiles show --profile aarch64-virt-development --json
-./emulator/ovd_manager.sh profiles validate
-./emulator/ovd_manager.sh profiles render --profile riscv64-virt-minimal
+## Configuration roots
 
-# Create a native OVD from a catalog profile.
-./emulator/ovd_manager.sh create-from-profile \
-  --profile aarch64-virt-development \
-  --name arm-dev
-```
+The defaults are repository-local:
 
-Native QEMU profiles require an Omega kernel artifact and an ext4 system-image
-artifact. Resolution records the source revision and profile identity so a
-missing or stale kernel/image is rebuilt. Existing profile-backed OVDs refresh
-their local image from the verified profile artifact before launch. Use the
-dry-run operation to inspect the required artifact paths without changing the
-workspace:
+| Purpose | Default | Override |
+| --- | --- | --- |
+| OVD instances | `emulator/ovd/` | `OMEGA_OVD_ROOT` |
+| Kernel builds | `build/` | `OMEGA_BUILD_ROOT` |
+| Profile images | `disk_images/` | `OMEGA_IMAGE_ROOT` |
 
-```sh
-./emulator/ovd_manager.sh profiles artifacts \
-  --profile aarch64-virt-development --dry-run
-```
+All paths are resolved with `pathlib`. OVD names and configured image paths are
+validated against traversal and absolute-path escapes before use.
 
-The default Omega system filesystem is ext4. FAT32 is retained only as an
-optional boot/EFI compatibility filesystem. The ext4 image builder stages the
-kernel into a temporary directory and uses `mke2fs`/`mkfs.ext4`; it is
-intentionally fail-closed until the host provides the required filesystem
-tooling and never labels a zero-filled file as a valid ext4 image.
-Android AVD and VMApple profiles are external adapters and are described by
-the catalog, but cannot be launched as generic `-M virt` OVDs.
-
-`create-from-profile` uses the profile’s catalog RAM and image-size defaults.
-If `--ram` or `--disk` is supplied, `--disk` must match the profile’s declared
-system-image size so the OVD configuration cannot disagree with its backing
-image. Use `profiles show --profile PROFILE --json` to inspect those values.
-External profiles remain inspectable, but native creation is rejected until
-their Android Emulator or VMApple adapters are available.
-
-## OVD layout
-
-By default, OVDs are stored under `emulator/ovd/`:
+## Create and manage an OVD
 
 ```text
-emulator/ovd/phone/
-├── config.ini
-├── userdata.img
-└── state/
-    ├── command.argv
-    ├── qemu.log
-    ├── qemu.pid
-    ├── qmp.sock
-    └── network.sock
+python3 -m emulator.ovd_cli create \
+  --name phone --arch x86_64 --ram 1024 --disk 64 \
+  --storage virtio --network none
+
+python3 -m emulator.ovd_cli list --json
+python3 -m emulator.ovd_cli show --name phone
+python3 -m emulator.ovd_cli validate --name phone
+python3 -m emulator.ovd_cli status --name phone
+python3 -m emulator.ovd_cli logs --name phone
+python3 -m emulator.ovd_cli stop --name phone
+python3 -m emulator.ovd_cli delete --name phone
 ```
 
-The runtime files are created only when the corresponding features are used.
-`state/` must not be copied into a running clone or treated as persistent
-device data.
+`create` creates a managed OVD directory and a raw, sparse-sized backing file.
+That generic file is not automatically formatted as ext4. Use
+`create-from-profile` for a profile-backed ext4 image, or provide and manage
+the required filesystem image through the project image-generation workflow.
+When `disk_images/omega-<arch>-bootable.img` exists, generic creation copies it
+into the OVD automatically. A specific bootable image can be selected with
+`--boot-image`; otherwise creation records `ovd.bootable=false` rather than
+claiming that a blank disk is bootable. For intentionally blank test media,
+use `--allow-blank` explicitly.
 
-## OVD configuration
+QEMU machine models are discovered from the installed QEMU binaries:
 
-New devices use schema version 1:
-
-```ini
-ovd.schema=1
-ovd.name=phone
-ovd.arch=x86_64
-ovd.ram_mb=1024
-ovd.disk_mb=64
-ovd.storage.profile=virtio
-ovd.storage.image=userdata.img
-ovd.storage.format=raw
-ovd.storage.readonly=false
-ovd.display.profile=standard-vga
-ovd.network.profile=none
-ovd.initrd=
+```text
+python3 -m emulator machines --arch x86_64
+python3 -m emulator machines --arch aarch64 --json
+python3 -m emulator machines --arch riscv64
+python3 -m emulator create --name custom-arm --arch aarch64 --machine virt
 ```
 
-The manager validates architecture, resource sizes, names, storage profiles,
-network profiles, display profiles, and configured image paths. Older configs
-using `ovd.ram`, `ovd.disk`, or `ovd.storage` remain readable through
-compatibility fallbacks.
+The discovery command is the Python equivalent of `qemu-system-<arch>
+-machine help`. It uses a direct subprocess argument vector and does not
+parse a shell command. Machine names are stored in each OVD configuration and
+are also selectable in the GUI.
 
-Use validation before launching an existing or imported OVD:
+Supported architectures are `x86_64`, `aarch64`, `armv7`, and `riscv64`. Storage
+profiles are `auto`, `virtio`, `ahci`, `usb`, `sd`, `optical`, and `none`.
+Network profiles are `none`, `user`, and `socket`.
 
-```sh
-./emulator/ovd_manager.sh validate --name phone
-./emulator/ovd_manager.sh show --name phone
+## Predefined profiles
+
+The catalog includes directly launchable generic device classes for the three
+supported 64-bit ISAs:
+
+| Profile | Device class | QEMU machine | Default storage |
+| --- | --- | --- | --- |
+| `x86_64-desktop-q35` | Modern desktop/workstation | `q35` | VirtIO raw image |
+| `x86_64-desktop-pc-legacy` | Legacy desktop | `pc` | VirtIO raw image |
+| `x86_64-laptop-q35` | Laptop/workstation | `q35` | VirtIO raw image |
+| `aarch64-virt-development` | ARM64 board/tablet development | `virt` | VirtIO-MMIO raw image |
+| `aarch64-raspi4b-qemu` | Raspberry Pi 4B experimental board | `raspi4b` | SD raw image |
+| `riscv64-virt-development` | RV64 development platform | `virt` | VirtIO-MMIO raw image |
+| `riscv64-virt-minimal` | Minimal RV64/headless device | `virt` | VirtIO-MMIO raw image |
+
+The following ARMv7 board profiles are catalogued for machine selection and
+future board-kernel integration, but are conditional rather than native Omega
+profiles because the repository does not yet contain an ARMv7 kernel/toolchain:
+
+- `armv7-raspi1ap-qemu` — Raspberry Pi A+ (`raspi1ap`)
+- `armv7-raspi0-qemu` — Raspberry Pi Zero (`raspi0`)
+- `armv7-bananapi-m2u-qemu` — Banana Pi M2U (`bpim2u`)
+- `armv7-orangepi-pc-qemu` — Orange Pi PC (`orangepi-pc`)
+
+Android AArch64 phone/tablet and Apple VMApple entries are also catalogued,
+but remain external-adapter profiles because they require vendor-managed
+system images or firmware.
+
+```text
+python3 -m emulator.ovd_cli profiles list --json
+python3 -m emulator.ovd_cli profiles show \
+  --profile aarch64-virt-development --json
+python3 -m emulator.ovd_cli profiles validate --json
+python3 -m emulator.ovd_cli profiles render \
+  --profile riscv64-virt-minimal --json
+python3 -m emulator.ovd_cli profiles artifacts \
+  --profile x86_64-desktop-q35 --dry-run --json
+
+python3 -m emulator.ovd_cli create-from-profile \
+  --profile x86_64-desktop-q35 --name desktop-q35
 ```
 
-## Creating devices
+Native Omega profiles require ext4 system images and raw storage containers.
+Android AVD and VMApple profiles are classified as external adapters and are
+reported without pretending that their proprietary artifacts are native Omega
+images. `profiles artifacts` reports whether the expected current kernel and
+profile image exist. Optional `<artifact>.sha256` sidecars are checked and a
+digest mismatch is reported explicitly; no fake image is created when an
+artifact is missing. A profile-backed OVD can be created only after its ext4
+image exists.
 
-```sh
-./emulator/ovd_manager.sh create \
-  --name laptop \
-  --arch x86_64 \
-  --ram 4096 \
-  --disk 512 \
-  --storage virtio \
-  --network user \
-  --display standard-vga
+## Launching
+
+```text
+python3 -m emulator.ovd_cli start --name phone --dry-run
+python3 -m emulator.ovd_cli start --name phone --no-gpu --daemon
+python3 -m emulator.ovd_cli start --name phone --storage usb --dry-run
+python3 -m emulator.ovd_cli start --name phone --network user --dry-run
+python3 -m emulator.ovd_cli start --name phone --ephemeral --dry-run
+python3 -m emulator.ovd_cli start --name phone --vnc 1 --gpu --dry-run
 ```
 
-Create an AArch64 or RISC-V device:
+`start` writes the exact argument vector to `state/command.json`. Actual
+execution uses `subprocess.Popen(..., shell=False)` and records a PID,
+executable/command identity, lifecycle state, and QEMU output under the OVD's
+`state/` directory. Stop operations verify process identity and terminate the
+complete QEMU process session where supported. The `ovd_run` compatibility
+entry point maps `run` to the same Python start implementation:
 
-```sh
-./emulator/ovd_manager.sh create \
-  --name tablet \
-  --arch aarch64 \
-  --ram 2048 \
-  --disk 128 \
-  --storage virtio \
-  --network none \
-  --display simplefb
+```text
+python3 -m emulator.ovd_run run --name phone --no-gpu --dry-run
 ```
 
-Attach an initrd during creation:
+The command requires both the OVD image and the architecture-specific Omega
+kernel. Use `--dry-run` to inspect the complete argument vector without
+starting QEMU. `--daemon` is accepted for compatibility with managed-launch
+workflows; the manager always records the process PID and returns without
+creating a service or background shell job.
 
-```sh
-./emulator/ovd_manager.sh create \
-  --name recovery \
-  --arch x86_64 \
-  --initrd build/initrd.img
+`--vnc DISPLAY` adds QEMU's local RFB server at `127.0.0.1:5900+DISPLAY`.
+The built-in GUI's “Launch with VNC” and “Connect VNC” actions use the
+dependency-free Tkinter RFB viewer. It supports long-lived idle sessions,
+raw framebuffer updates, composited partial updates, defensive CopyRect and
+DesktopSize handling, clipboard text in both directions, mouse
+movement/buttons/wheel, and keyboard events. VNC connection attempts run off
+the Tkinter event loop and retry while QEMU is starting. Clipboard and HID
+devices are attached to QEMU by default; use
+`--no-clipboard` when required. A VNC session requests a graphical QEMU
+device even for a normally headless profile, because VNC cannot display a
+serial-only console.
+
+## Snapshots, cloning, and archives
+
+Snapshots are portable file copies and therefore work for raw images without
+`qemu-img`:
+
+```text
+python3 -m emulator.ovd_cli snapshot create --name phone --snapshot clean
+python3 -m emulator.ovd_cli snapshot list --name phone
+python3 -m emulator.ovd_cli snapshot apply --name phone --snapshot clean
+python3 -m emulator.ovd_cli clone --name phone --new-name phone-copy
+python3 -m emulator.ovd_cli export --name phone --output phone.tar.gz
+python3 -m emulator.ovd_cli import --archive phone.tar.gz --name phone-imported
 ```
 
-Valid names contain 1–64 letters, numbers, `.`, `_`, or `-`. Path traversal,
-slashes, whitespace, and shell metacharacters are rejected.
+Archives are inspected for absolute paths, traversal components, links,
+unsupported members, and multiple top-level roots before extraction. The
+extractor works on Python 3.10+ without relying on the newer
+`TarFile.extractall(filter=...)` API. Imported devices are validated in a
+temporary location before being published.
 
-RAM and disk values are specified in MiB. Current validation limits are:
+## GUI OVD Manager
 
-- RAM: 128–1,048,576 MiB;
-- disk: 1–16,777,216 MiB.
+The GUI OVD Manager is a Tkinter application for creating, configuring,
+launching, monitoring, and stopping Omega Virtual Devices. It uses the same
+`OVDManager` backend as the CLI, so GUI-created devices can also be managed
+from the command line.
 
-## Managing devices
+### Getting started
 
-List devices in human-readable form:
+From the repository root:
 
-```sh
-./emulator/ovd_manager.sh list
+```text
+python3 -m emulator.ovd_gui
 ```
 
-Example machine-readable output:
+On Windows, the equivalent command is:
 
-```sh
-./emulator/ovd_manager.sh list --json
+```text
+py -m emulator.ovd_gui
 ```
 
-Inspect state and logs:
+Before launching the GUI:
 
-```sh
-./emulator/ovd_manager.sh status --name laptop
-./emulator/ovd_manager.sh logs --name laptop
+1. Install Python 3.10 or newer with Tkinter support.
+2. Install the QEMU executable for each architecture you want to run.
+3. Make sure the QEMU executables are available on `PATH`.
+4. Build or provide the matching Omega kernel and disk image.
+
+The GUI uses these environment variables, exactly like the CLI:
+
+| Variable | Purpose | Default |
+| --- | --- | --- |
+| `OMEGA_OVD_ROOT` | Persistent OVD definitions and state | `emulator/ovd/` |
+| `OMEGA_BUILD_ROOT` | Architecture-specific Omega kernels | `build/` |
+| `OMEGA_IMAGE_ROOT` | Bootable and profile-backed images | `disk_images/` |
+
+Example first-run workflow:
+
+```text
+python3 -m emulator.ovd_gui
 ```
 
-Start and stop devices:
+Then:
 
-```sh
-./emulator/ovd_manager.sh start --name laptop --no-gpu --daemon
-./emulator/ovd_manager.sh stop --name laptop
-./emulator/ovd_manager.sh stop --name laptop --force
+1. Select an architecture in the kernel selector.
+2. Click `Build / Refresh Kernel` if the kernel is missing or outdated.
+3. Open `Create / Configure`.
+4. Select a predefined profile, or leave `(generic OVD)` selected.
+5. Enter a unique device name.
+6. Review the machine, CPU, RAM, disk, storage, and network settings.
+7. Create the OVD.
+8. Return to `Devices` and select the new device.
+9. Click `Readiness` and resolve any failed checks.
+10. Use `Launch Headless`, `Launch GUI`, or `Launch VNC`.
+
+### GUI tabs
+
+#### Devices
+
+The Devices tab provides:
+
+- OVD inventory for multiple devices;
+- profile, architecture, QEMU machine, RAM, disk, and storage columns;
+- bootable-image status;
+- stopped/running state;
+- device selection;
+- configuration validation;
+- readiness diagnostics;
+- exact QEMU command preview;
+- headless launch;
+- graphical launch;
+- VNC launch;
+- graceful stop;
+- force stop;
+- deletion with confirmation;
+- periodic state refresh;
+- selected-device readiness details.
+
+`Readiness` verifies the Omega kernel, disk image, QEMU executable, and
+selected machine model before a launch. Unsupported machine combinations,
+missing artifacts, and external-only profiles are reported as actionable
+errors.
+
+#### Create / Configure
+
+The Create / Configure tab supports:
+
+- predefined profile selection;
+- generic OVD creation;
+- architecture selection;
+- QEMU machine selection from installed QEMU capabilities;
+- QEMU CPU selection;
+- RAM configuration;
+- disk-size configuration;
+- storage transport selection;
+- network-mode selection;
+- VNC display-number configuration;
+- form reset;
+- architecture-specific kernel status;
+- profile-default population.
+
+The available machine list is discovered from the installed QEMU binary using
+the equivalent of `qemu-system-<arch> -machine help`. Discovery runs in a
+worker thread so a missing or slow QEMU installation does not freeze the GUI.
+
+Native profile creation requires a compatible Omega kernel and bootable image.
+External and conditional profiles are visible for inspection but their native
+creation action is disabled when they require an external adapter, vendor
+firmware, or an unavailable architecture-specific kernel.
+
+#### Console / Diagnostics
+
+The Console / Diagnostics tab provides:
+
+- latest QEMU output;
+- refreshable logs;
+- generated QEMU command display;
+- command copying to the host clipboard;
+- launch and failure diagnostics;
+- state information for the selected device.
+
+Kernel builds run asynchronously, and errors are shown in the GUI rather than
+being lost in a terminal process.
+
+### Supported device and architecture management
+
+The GUI can inspect and configure profiles for:
+
+- x86_64 Q35 desktops and laptops;
+- x86_64 legacy PC/i440FX systems;
+- AArch64 `virt` development systems;
+- AArch64 Raspberry Pi 4B experimental targets;
+- RISC-V 64 `virt` development systems;
+- RISC-V 64 minimal/headless systems;
+- ARMv7 Raspberry Pi A+ and Zero profiles;
+- ARMv7 Banana Pi M2U;
+- ARMv7 Orange Pi PC;
+- Android phone/tablet external profiles;
+- Apple Silicon VMApple external profiles.
+
+The directly launchable native targets are the profiles with a supported
+Omega kernel, bootable image, QEMU executable, and compatible machine model.
+Board and external-adapter profiles remain explicitly classified instead of
+being presented as fully validated native devices.
+
+### Launch modes and VNC
+
+The GUI supports:
+
+- headless serial-console launch;
+- host graphical QEMU launch where the host display backend is available;
+- local VNC launch and connection;
+- GPU-enabled launch;
+- GPU-disabled launch;
+- configurable VNC display numbers;
+- clipboard-enabled VNC input;
+- clipboard-disabled launch when required.
+
+The integrated VNC viewer requires no external VNC application. It provides:
+
+- raw framebuffer display;
+- composited incremental updates;
+- keyboard input;
+- function and special keys;
+- Shift, Control, and Alt modifiers;
+- mouse movement;
+- left, middle, and right buttons;
+- mouse-wheel events;
+- host-to-guest clipboard paste;
+- guest-to-host clipboard transfer;
+- Control-V and Command-V paste shortcuts;
+- connection retries while QEMU starts;
+- idle-session stability after the initial connection timeout;
+- framebuffer, coordinate, socket, and clipboard-size safety limits;
+- background connection and reader threads that do not block the GUI;
+- graceful socket and Tkinter-window shutdown.
+
+VNC is bound to `127.0.0.1` by default. It is intended for local development;
+the built-in viewer supports QEMU's unauthenticated local security mode but
+does not provide VNC password authentication or TLS. It intentionally requests
+raw framebuffer encoding and rejects unsupported encodings safely.
+
+### Lifecycle and safety behavior
+
+The manager persists runtime information under each OVD's `state/` directory:
+
+- `command.json` — exact QEMU argument vector;
+- `qemu.log` — QEMU output;
+- `qemu.pid` — compatibility PID record;
+- `process.json` — process identity and command digest;
+- `lifecycle.json` — starting/running lifecycle metadata;
+- QMP and network endpoint state where configured.
+
+Stop operations verify the persisted process identity before sending signals.
+QEMU is launched in a separate process session, allowing the manager to stop
+the process group on supported hosts. Runtime state is excluded from exported
+OVD archives.
+
+The GUI also protects users by:
+
+- validating OVD names and paths;
+- preventing path traversal;
+- refusing unsupported profile combinations;
+- refusing missing runtime artifacts for real launches;
+- confirming deletion;
+- distinguishing normal stop from force stop;
+- avoiding shell commands and shell pipelines.
+
+### GUI and CLI interoperability
+
+The GUI does not create a separate device format. All devices are stored in
+the normal OVD directory structure and can be inspected with:
+
+```text
+python3 -m emulator.ovd_cli list --json
+python3 -m emulator.ovd_cli show --name DEVICE_NAME
+python3 -m emulator.ovd_cli status --name DEVICE_NAME
+python3 -m emulator.ovd_cli validate --name DEVICE_NAME
+python3 -m emulator.ovd_cli logs --name DEVICE_NAME
 ```
 
-`--force` is intended for unresponsive or stale processes. Normal shutdown
-uses QMP when available and falls back to signals.
+This makes it possible to create a device in the GUI, preview or launch it
+from the CLI, and inspect the same logs and lifecycle state from either
+interface.
 
-Delete a stopped device:
+### Current GUI boundaries
 
-```sh
-./emulator/ovd_manager.sh delete --name laptop
+The backend already supports snapshots, cloning, archive import/export, and
+QMP state management. Dedicated GUI workflows for those operations are still
+being expanded. Live QEMU boot, VNC interaction, and full Windows/macOS
+process behavior require host-specific integration testing with a desktop
+session and installed guest artifacts.
+
+On systems where Python was installed without Tkinter, install a Python build
+that includes Tk support. No `wish`, Tcl source file, or platform-specific
+window command is used by Omega.
+
+## Python tests
+
+```text
+python3 -m unittest emulator.test_ovd_unit \
+  emulator.test_profile_catalog \
+  emulator.test_profile_ext4_integration \
+  emulator.test_vnc emulator.test_gui_module -v
+python3 scripts/test_scripts_unit.py
 ```
 
-Delete a running device only when intentionally discarding it:
+The tests exercise validation, traversal protection, deterministic profile
+rendering, dry-run command vectors, cloning, archive import/export, snapshots,
+and ext4 profile policy, direct-CMake build invocation, process identity,
+runtime artifact checks, VNC handshake, idle-session behavior, Bell parsing,
+framebuffer conversion, clipboard limits, keyboard/mouse encoding, and
+headless GUI imports.
+QEMU launches are intentionally tested separately
+because they require an installed architecture-specific QEMU binary.
 
-```sh
-./emulator/ovd_manager.sh delete --name laptop --force
+The GUI module is importable in headless CI, but constructing the `Tk()` window
+requires an available desktop display. This keeps the core manager testable on
+Windows services, Linux CI workers, and macOS terminal sessions without a GUI.
+
+## Python API
+
+```python
+from emulator.ovd_core import OVDManager
+
+manager = OVDManager()
+manager.create("demo", arch="x86_64", ram=1024, disk=64)
+command = manager.start("demo", dry_run=True)
+print(command)
 ```
 
-## Launching devices
-
-The low-level launcher accepts the full option set:
-
-```sh
-./emulator/ovd_run.sh run --name phone [options]
-```
-
-Options:
-
-| Option | Description |
-| --- | --- |
-| `--gpu` | Enable graphical display behavior |
-| `--no-gpu` | Force serial/headless behavior |
-| `--storage PROFILE` | Override the configured storage profile |
-| `--storage-image FILE` | Use an external storage image |
-| `--network PROFILE` | Override the configured network profile |
-| `--initrd FILE` | Attach an initrd image |
-| `--readonly` | Open the storage image read-only |
-| `--ephemeral` | Use QEMU snapshot mode and discard disk writes on exit |
-| `--qmp` | Enable QMP for a foreground launch |
-| `--no-qmp` | Disable QMP, including daemon-mode QMP |
-| `--daemon` | Run in background and record lifecycle state |
-| `--dry-run` | Print the exact QEMU command without starting it |
-
-Examples:
-
-```sh
-./emulator/ovd_run.sh run --name phone --gpu
-./emulator/ovd_run.sh run --name phone --no-gpu
-./emulator/ovd_run.sh run --name phone --ephemeral --no-gpu
-./emulator/ovd_run.sh run --name phone --network user --daemon
-./emulator/ovd_run.sh run --name phone --initrd build/initrd.img --dry-run
-./emulator/ovd_run.sh run --name phone --storage-image /tmp/test.img --readonly
-```
-
-`--dry-run` is the recommended first step when diagnosing QEMU arguments. It
-also works without starting a VM and records the generated arguments in
-`state/command.argv`.
-
-## Display profiles
-
-| Architecture | Display behavior |
-| --- | --- |
-| x86_64 | Standard VGA / Bochs VBE with optional SDL or Cocoa output |
-| AArch64 | SimpleFb/serial fallback; experimental VirtIO-GPU with `--gpu` |
-| RISC-V | SimpleFb/serial fallback; experimental VirtIO-GPU with `--gpu` |
-
-On Linux, graphical mode uses SDL when `DISPLAY` is set. On macOS it uses
-Cocoa. If no graphical session is available, use `--no-gpu` or inspect the
-command with `--dry-run`.
-
-## Storage profiles
-
-Storage profiles select the QEMU transport for the OVD backing image:
-
-| Profile | x86_64 | AArch64 | RISC-V | QEMU model |
-| --- | --- | --- | --- | --- |
-| `virtio` | Yes | Yes | Yes | `virtio-blk-pci` / `virtio-blk-device` |
-| `ahci` | Yes | No | No | IDE/ATA-style disk attachment |
-| `usb` | Yes | Yes | Yes | USB Mass Storage model |
-| `sd` | Yes | Yes | Yes | SD drive attachment |
-| `optical` | Yes | Yes* | Yes* | Read-only `ide-cd` model |
-| `none` | Yes | Yes | Yes | No storage device |
-
-`*` Command construction is supported; runtime availability depends on the
-QEMU machine’s controller model.
-
-Examples:
-
-```sh
-./emulator/ovd_run.sh run --name phone --storage virtio --dry-run
-./emulator/ovd_run.sh run --name phone --storage usb --no-gpu
-./emulator/ovd_run.sh run --name phone --storage optical --dry-run
-./emulator/ovd_run.sh run --name phone --storage none --dry-run
-```
-
-The current kernel storage implementation includes a common storage layer,
-synthetic writable backend, GPT/MBR parser, and guarded experimental
-VirtIO-Block path. NVMe, AHCI, SDHCI, USB MSC, ATAPI, filesystem mounting,
-and production hardware writes remain separate kernel milestones.
-
-## Network profiles
-
-| Profile | Behavior |
-| --- | --- |
-| `none` | No network device is attached |
-| `user` | QEMU user-mode networking with a VirtIO network device |
-| `socket` | Unix-socket network endpoint for multi-VM experiments |
-
-Examples:
-
-```sh
-./emulator/ovd_run.sh run --name phone --network none --dry-run
-./emulator/ovd_run.sh run --name phone --network user --daemon
-./emulator/ovd_run.sh run --name phone --network socket --dry-run
-```
-
-The network profile controls QEMU wiring. It does not imply that the Omega
-kernel network stack has a complete device initialization path for every
-architecture or transport.
-
-## Initrd, external images, and ephemeral mode
-
-Attach an initrd:
-
-```sh
-./emulator/ovd_run.sh run --name phone --initrd build/initrd.img --dry-run
-```
-
-Use an external image explicitly selected by the user:
-
-```sh
-./emulator/ovd_run.sh run \
-  --name phone \
-  --storage-image /tmp/omega-test.img \
-  --storage virtio \
-  --readonly
-```
-
-Use a disposable disk view:
-
-```sh
-./emulator/ovd_run.sh run --name phone --ephemeral --no-gpu
-```
-
-Ephemeral mode passes QEMU’s `-snapshot` option. It does not create a named
-OVD snapshot; use the snapshot commands below for persistent image snapshots.
-
-## Snapshots
-
-Snapshots require `qemu-img` and a compatible image format:
-
-```sh
-./emulator/ovd_manager.sh snapshot create \
-  --name phone \
-  --snapshot clean
-
-./emulator/ovd_manager.sh snapshot list --name phone
-./emulator/ovd_manager.sh snapshot apply --name phone --snapshot clean
-```
-
-Stop the device before creating or applying a snapshot. Snapshot operations
-modify the backing image and should not be interrupted.
-
-## Clone, export, and import
-
-Clone an OVD without copying runtime PID, log, or socket state:
-
-```sh
-./emulator/ovd_manager.sh clone \
-  --name phone \
-  --new-name phone-copy
-```
-
-Export and import an OVD:
-
-```sh
-./emulator/ovd_manager.sh export \
-  --name phone \
-  --output phone.tar.gz
-
-./emulator/ovd_manager.sh import \
-  --archive phone.tar.gz \
-  --name phone-restored
-```
-
-Imported archives are validated before the OVD becomes usable. Do not import
-archives from untrusted sources without reviewing their contents.
-
-## GUI manager
-
-The GUI is a Tcl/Tk front end to `ovd_manager.sh`; the shell manager and
-profile catalog remain the source of truth. It does not maintain a separate
-device database. Every refresh reads the current OVD directories and profile
-catalog from disk.
-
-### Requirements and startup
-
-Install Tcl/Tk (`wish`) and ensure the required command-line tools are on the
-`PATH`:
-
-- `bash`, `python3`, and the Omega profile catalog files;
-- `cmake`, Clang/LLVM, and the relevant architecture toolchain for profile
-  artifact builds;
-- the architecture-specific QEMU binary for launching a device; and
-- `mke2fs` or `mkfs.ext4` for native ext4 profile-image creation.
-
-Start the executable GUI from the repository root or from another directory:
-
-```sh
-./emulator/ovd_gui.tcl
-```
-
-The GUI determines its own script directory, so it can locate
-`ovd_manager.sh`, `profile_catalog.py`, and `profiles/catalog.json` without
-requiring the current working directory to be the repository root. On a
-headless host, use the CLI and `--dry-run` options instead; the Tcl/Tk window
-requires a graphical session.
-
-### Profile workflow
-
-1. Open the **Predefined profile** selector. Profiles are loaded from the
-   canonical catalog and display their architecture, backend, and status.
-2. Select a native QEMU profile. The GUI fills RAM and disk fields from the
-   catalog; these values are not hardcoded GUI defaults.
-3. Enter a unique OVD name.
-4. Optionally inspect the profile or run **Check profile artifacts (dry-run)**
-   before creating the device.
-5. Select **Create from selected profile**.
-
-Native profile creation resolves the compatible kernel and ext4 system image,
-then creates an OVD containing `system.ext4` and profile metadata. The catalog
-image size is authoritative, so a disk override must match the profile image
-size. On every later launch, the launcher verifies the profile artifacts and
-refreshes the OVD-local image when the verified artifact has changed.
-
-Android AVD and VMApple entries can be inspected and checked for metadata, but
-their creation button is disabled. They require external adapters and are not
-silently converted into generic `qemu-system-aarch64 -M virt` devices.
-
-### Generic OVD workflow
-
-To create a compatibility-mode OVD instead of a catalog profile:
-
-1. Leave **Predefined profile** set to **(generic OVD)**.
-2. Enter the device name.
-3. Select the architecture, RAM, disk size, storage transport, and network
-   profile.
-4. Select **Create generic OVD**.
-
-Generic devices use the existing `userdata.img` backing image and support the
-storage transports exposed by the manager: `virtio`, `ahci`, `usb`, `sd`,
-`optical`, and `none`. Generic creation does not claim a predefined hardware
-profile or ext4 system-image contract.
-
-### Managing an OVD
-
-The device table refreshes automatically every three seconds. Select a row to
-see its profile and state, then use the management controls:
-
-- **Launch selected (GUI)** starts the device with graphical display options.
-- **Launch selected (headless)** starts with serial/headless display behavior.
-- **Stop selected** requests a normal QMP/QEMU shutdown.
-- **Validate selected** checks the OVD configuration and image path.
-- **View selected logs** displays the managed QEMU log when available.
-- **Delete selected** removes the OVD after confirmation; running devices must
-  be stopped first.
-
-The GUI intentionally does not expose every advanced lifecycle operation.
-Use the CLI for snapshots, clone, import/export, initrd selection, ephemeral
-launches, storage-image overrides, QMP options, and exact `--dry-run` command
-inspection.
-
-## Environment isolation
-
-Use these variables to keep OVD state outside the repository:
-
-```sh
-export OMEGA_OVD_ROOT="$PWD/.omega-test/ovd"
-export OMEGA_BUILD_ROOT="$PWD/.omega-test/build"
-export OMEGA_IMAGE_ROOT="$PWD/.omega-test/images"
-```
-
-This is recommended for CI, parallel worktrees, and destructive test runs.
-The current launcher still resolves kernel source and toolchain files from the
-repository root.
-
-## Testing
-
-Unit tests do not boot QEMU:
-
-```sh
-./emulator/test_ovd_unit.sh
-./emulator/test_profile_catalog.sh
-./emulator/test_profile_ext4_integration.sh
-tclsh emulator/test_ovd_gui.tcl
-```
-
-The OVD unit suite verifies:
-
-- shell syntax;
-- invalid names, profiles, architectures, RAM, and disk sizes;
-- schema/configuration persistence;
-- human-readable and JSON listing;
-- all storage profile dry-runs;
-- architecture/profile compatibility;
-- daemon startup, status, and stop with fake QEMU;
-- clone and validation;
-- export/import;
-- snapshot command dispatch with fake `qemu-img`;
-- cleanup behavior.
-
-The profile catalog suite additionally verifies catalog defaults, native versus
-external profile classification, deterministic rendering, ext4 artifact
-resolution, and dry-run behavior. The Tcl/Tk suite verifies GUI profile
-controls, default-field integration, external-profile guards, and manager
-actions at the script-contract level.
-
-The lifecycle suite boots real QEMU instances:
-
-```sh
-./emulator/test_ovd.sh
-```
-
-It covers x86_64, AArch64, and RISC-V boot markers, display fallback, and
-storage command wiring. The broader project suite is:
-
-```sh
-./scripts/test.sh
-```
-
-The test scripts intentionally terminate QEMU after expected boot markers.
-`Killed: 9` messages from those bounded idle-loop tests are expected.
-
-## Troubleshooting
-
-### OVD does not exist
-
-Create or list devices:
-
-```sh
-./emulator/ovd_manager.sh list
-./emulator/ovd_manager.sh create --name phone --arch x86_64
-```
-
-### Configuration is invalid
-
-Run:
-
-```sh
-./emulator/ovd_manager.sh validate --name phone
-```
-
-Check architecture, RAM, disk size, storage profile, image path, and network
-profile.
-
-### QEMU is not found
-
-Install the architecture-specific QEMU system binary and confirm:
-
-```sh
-command -v qemu-system-x86_64
-command -v qemu-system-aarch64
-command -v qemu-system-riscv64
-```
-
-### Graphical mode does not open
-
-Use headless mode:
-
-```sh
-./emulator/ovd_run.sh run --name phone --no-gpu
-```
-
-On Linux, verify `DISPLAY`; on macOS, use Cocoa through the default GUI
-launcher.
-
-### Device is reported as already running
-
-Inspect state and stop it:
-
-```sh
-./emulator/ovd_manager.sh status --name phone
-./emulator/ovd_manager.sh stop --name phone --force
-```
-
-Review `state/qemu.pid`, `state/qemu.log`, and `state/command.argv` if the
-process is no longer present but stale state remains.
-
-### Storage profile fails at runtime
-
-First inspect the command:
-
-```sh
-./emulator/ovd_run.sh run --name phone --storage virtio --dry-run
-```
-
-Some profiles are currently command-construction and emulator-model tests;
-the corresponding kernel hardware driver may still be experimental or
-unimplemented.
-
-## Safety notes
-
-- OVD names are validated before filesystem operations.
-- Deleting a running OVD requires `--force`.
-- Use isolated roots for automated tests.
-- Stop devices before snapshot, clone, export, or delete operations.
-- Review imported archives before using them.
-- Never use a production disk image as an OVD backing image without a backup.
-- The emulator is a development tool; it is not a security boundary.
+The primary reusable classes are `OVDManager`, `ProfileCatalog`, `QemuBackend`,
+and `EmulatorError` in `emulator/ovd_core.py`.

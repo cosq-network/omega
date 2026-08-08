@@ -25,10 +25,12 @@ The first implementation slice is now present in the repository:
 - `emulator/profiles/schema.json` documents the profile contract;
 - `emulator/profile_catalog.py` validates, lists, shows, renders, and performs
   dry-run native artifact resolution;
-- `emulator/ovd_manager.sh profiles ...` exposes the catalog operations;
+- `python3 -m emulator.ovd_cli profiles ...` exposes the catalog operations;
 - profile-backed native OVD configuration enforces ext4 and explicit artifact
   policy metadata; and
-- `emulator/test_profile_catalog.sh` covers all three native architectures,
+- Raspberry Pi 4B, Raspberry Pi A+/Zero, Banana Pi M2U, and Orange Pi PC
+  board profiles are now catalogued with explicit QEMU machine names;
+- `emulator/test_profile_catalog.py` covers all three native architectures,
   external profile classification, deterministic rendering, and ext4 dry-run
   behavior.
 
@@ -362,12 +364,13 @@ Windows, macOS, Android, or a BSD guest unless a separate test suite exists.
 
 | Profile ID | Architecture | Form factor | Backend | Status |
 | --- | --- | --- | --- | --- |
-| `x86_64-desktop-q35` | x86_64 | desktop/workstation | QEMU `q35` | planned |
-| `x86_64-desktop-pc-legacy` | x86_64 | desktop/legacy laptop | QEMU `pc` | planned |
-| `x86_64-laptop-q35` | x86_64 | laptop | QEMU `q35` | planned |
-| `aarch64-virt-development` | AArch64 | development board/tablet class | QEMU `virt` | planned |
-| `riscv64-virt-development` | RV64 | workstation/development board | QEMU `virt` | planned |
-| `riscv64-virt-minimal` | RV64 | minimal embedded/server | QEMU `virt` | planned |
+| `x86_64-desktop-q35` | x86_64 | desktop/workstation | QEMU `q35` | supported |
+| `x86_64-desktop-pc-legacy` | x86_64 | desktop/legacy laptop | QEMU `pc` | supported |
+| `x86_64-laptop-q35` | x86_64 | laptop | QEMU `q35` | supported |
+| `aarch64-virt-development` | AArch64 | development board/tablet class | QEMU `virt` | supported |
+| `aarch64-raspi4b-qemu` | AArch64 | Raspberry Pi 4B | QEMU `raspi4b` | experimental |
+| `riscv64-virt-development` | RV64 | workstation/development board | QEMU `virt` | supported |
+| `riscv64-virt-minimal` | RV64 | minimal embedded/server | QEMU `virt` | supported |
 
 ### 6.2 Conditional or external profiles
 
@@ -378,6 +381,10 @@ Windows, macOS, Android, or a BSD guest unless a separate test suite exists.
 | `android-x86_64-phone-avd` | Android Emulator | Generic x86_64 Android phone AVD | external-adapter |
 | `android-aarch64-tablet-avd` | Android Emulator | Generic Android tablet AVD | external-adapter |
 | `android-x86_64-tablet-avd` | Android Emulator | Generic x86_64 Android tablet AVD | external-adapter |
+| `armv7-raspi1ap-qemu` | QEMU `raspi1ap` | Raspberry Pi A+ board profile | conditional-external |
+| `armv7-raspi0-qemu` | QEMU `raspi0` | Raspberry Pi Zero board profile | conditional-external |
+| `armv7-bananapi-m2u-qemu` | QEMU `bpim2u` | Banana Pi M2U board profile | conditional-external |
+| `armv7-orangepi-pc-qemu` | QEMU `orangepi-pc` | Orange Pi PC board profile | conditional-external |
 
 These profiles must not be counted as direct OVD/QEMU coverage until their
 external dependencies are installed, detected, and tested.
@@ -472,7 +479,7 @@ The profile must generate a deterministic command without launching:
 ```bash
 emulator/profile_catalog.py validate --profile x86_64-desktop-q35
 emulator/profile_catalog.py render --profile x86_64-desktop-q35
-emulator/ovd_run.sh profile --profile x86_64-desktop-q35 --dry-run
+python3 -m emulator.ovd_cli profiles render --profile x86_64-desktop-q35 --json
 ```
 
 The output must include:
@@ -843,12 +850,12 @@ emulator/profile_catalog.py artifacts \
     --profile aarch64-virt-development \
     --policy build-if-stale
 
-emulator/ovd_manager.sh create-from-profile \
+python3 -m emulator.ovd_cli create-from-profile \
     --profile aarch64-virt-development \
     --name omega-aarch64-ext4
 
-emulator/ovd_manager.sh validate-artifacts \
-    --name omega-aarch64-ext4
+python3 -m emulator.ovd_cli profiles artifacts \
+    --profile aarch64-virt-development --dry-run
 ```
 
 The command output must identify whether each artifact was reused, rebuilt,
@@ -859,13 +866,13 @@ or rejected, and must print the exact manifest and digest paths.
 Add catalog-aware commands without breaking current instance commands:
 
 ```bash
-ovd_manager.sh profiles list
-ovd_manager.sh profiles show --profile x86_64-desktop-q35
-ovd_manager.sh profiles validate
-ovd_manager.sh create-from-profile \
+python3 -m emulator.ovd_cli profiles list
+python3 -m emulator.ovd_cli profiles show --profile x86_64-desktop-q35
+python3 -m emulator.ovd_cli profiles validate
+python3 -m emulator.ovd_cli create-from-profile \
     --profile x86_64-desktop-q35 \
     --name omega-q35-smoke
-ovd_manager.sh start --name omega-q35-smoke
+python3 -m emulator.ovd_cli start --name omega-q35-smoke
 ```
 
 The GUI should display:

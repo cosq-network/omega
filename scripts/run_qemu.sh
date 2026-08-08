@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # Quick x86_64 QEMU launcher. For named devices and lifecycle state, use the
-# OVD launcher under emulator/ovd_run.sh instead.
+# OVD launcher under `python3 -m emulator.ovd_run` instead.
 
 set -euo pipefail
 

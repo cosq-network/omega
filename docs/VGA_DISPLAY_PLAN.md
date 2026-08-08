@@ -407,7 +407,7 @@ Pages:    ceil(pitch × height / 4096), plus guard unmapped pages at end
 | **7.2d.2** | Spinlock for display output (SMP-safe when Phase 7.3 lands) | Concurrent `kprintf` from two threads |
 | **7.2d.3** | ANSI escape subset ( `\033[2J` clear, `\033[H` home, `\033[3xm` color) | Shell compatibility baseline |
 | **7.2d.4** | Fallback cascade unit tests | Each backend selectable via QEMU flags |
-| **7.2d.5** | OVD emulator `--gpu` integration | `ovd_run.sh --gpu` shows graphical window |
+| **7.2d.5** | OVD emulator `--gpu` integration | `python3 -m emulator.ovd_cli start --gpu` shows graphical window |
 
 ---
 

@@ -30,7 +30,7 @@ Phases **1–6** cover the research-kernel foundation (completed). Phases **7–
 | **Phase 5.5: VirtIO Network Stack** | `COMPLETED` | VirtIO-Net packet driver & TCP/IP stack | L2 Ethernet, L3 IPv4, L4 UDP/TCP headers | Frame RX Reader |
 | **Phase 6A: Bootable Disk Generator** | `COMPLETED` | UEFI/GPT multi-format disk generator | RAW, QCOW2, VMDK, VDI with FAT32 payloads | `create_bootable_disk.sh` |
 | **Phase 6B: Firmware Compatibility** | `COMPLETED` | U-Boot (`bootefi`/`booti`) & Coreboot (EDK2/GRUB) | Embedded `/EFI/BOOT/` & `/boot/omega.elf` | `docs/FIRMWARE_BOOT.md` |
-| **Phase 6C: OVD Emulator & GUI** | `COMPLETED` | Omega Virtual Device Manager & profile-aware Tcl/Tk GUI; multi-architecture display, storage, networking, artifact, and lifecycle tooling | Schema validation, predefined profiles, catalog defaults, ext4 artifact checks/refresh, safe paths, `--gpu` / `--no-gpu`, storage/network profiles, daemon/QMP state, snapshots, import/export, dry-run, GUI status/log controls | `test_ovd_unit.sh`, `test_profile_catalog.sh`, `test_ovd.sh`, `test_ovd_gui.tcl` |
+| **Phase 6C: OVD Emulator & GUI** | `HARDENING` | Python-only Omega Virtual Device Manager with a built-in Tkinter GUI; multi-architecture display, storage, networking, artifact, and lifecycle tooling | Schema validation, predefined profiles, ext4 artifact/digest checks, process identity and process-group lifecycle safety, transactional archive import, safe paths, storage/network profiles, snapshots, import/export, dry-run, asynchronous machine discovery, integrated VNC, and GUI diagnostics | `emulator/test_ovd_unit.py`, `emulator/test_profile_catalog.py`, `emulator/test_profile_ext4_integration.py`, `emulator/test_vnc.py`, `emulator/test_gui_module.py`, `scripts/test_scripts_unit.py` |
 | **Phase 6D: Containerization & CI/CD** | `COMPLETED` | Alpine Dockerfile, DevContainers, GitHub Actions | DevContainers, Codespaces, GitHub Actions CI/CD incl. `test_display.sh` | `.github/workflows/ci.yml` |
 
 ---
@@ -285,7 +285,7 @@ legacy boot-image mode.
 | **R0 Registry foundation** | `PARTIAL` | Versioned JSON schema/catalog, IDs, status, deterministic validation, listing, and rendering are implemented |
 | **R1 Native QEMU profiles** | `PARTIAL` | x86_64 `q35`/`pc`, AArch64 `virt`, and RISC-V `virt` definitions plus kernel freshness, staged ext4 image resolution, and verified OVD refresh |
 | **R2 Generated reports** | `PLANNED` | Deterministic CSV, JSON, Markdown, and lock artifacts |
-| **R3 OVD integration** | `PARTIAL` | Profile list/show/validate/render/artifacts commands, native create-from-profile path, profile-aware Tcl/Tk management, and verified image refresh are wired; external adapters remain |
+| **R3 OVD integration** | `PARTIAL` | Profile list/show/validate/render/artifacts commands, native create-from-profile path, profile-aware Python/Tkinter management, and verified image checks are wired; external adapters remain |
 | **R4 Android adapter** | `PLANNED` | AVD discovery, launch, GPU, ADB, snapshots, and cleanup |
 | **R5 VMApple adapter** | `PLANNED` | Apple-Silicon/macOS prerequisite and conditional launch workflow |
 | **R6 Physical mappings** | `PLANNED` | Hardware records linked to virtual approximations |

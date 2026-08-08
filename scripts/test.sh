@@ -148,11 +148,8 @@ bash "${PROJECT_ROOT}/scripts/test_storage.sh"
 bash "${PROJECT_ROOT}/scripts/test_ext4_unit.sh"
 
 echo -e "\n[*] Running OVD storage transport and lifecycle test suite..."
-bash "${PROJECT_ROOT}/scripts/test_scripts_unit.sh"
-bash "${PROJECT_ROOT}/emulator/test_ovd_unit.sh"
-bash "${PROJECT_ROOT}/emulator/test_profile_catalog.sh"
-bash "${PROJECT_ROOT}/emulator/test_profile_ext4_integration.sh"
-bash "${PROJECT_ROOT}/emulator/test_ovd.sh"
+python3 -m unittest emulator.test_ovd_unit emulator.test_profile_catalog emulator.test_profile_ext4_integration
+python3 -m emulator.ovd_cli profiles validate --json
 
 echo -e "\n${GREEN}=================================================${NC}"
 echo -e "${GREEN}      ALL INTEGRATION TESTS PASSED CLEANLY!       ${NC}"

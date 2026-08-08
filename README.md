@@ -29,7 +29,7 @@
 - **VirtIO-Block Path**: Opt-in x86_64 transitional VirtIO-PCI discovery with legacy queue geometry, feature negotiation, and verified read/write/flush completion; AArch64/RISC-V VirtIO-MMIO remains experimental. Enable with `-DENABLE_EXPERIMENTAL_VIRTIO_BLOCK=ON`.
 - **Firmware & Bootloader Compatibility**: Compatible with **UEFI/GPT**, **U-Boot** (`bootefi` / `booti`), and **Coreboot** (TianoCore / GRUB).
 - **Multi-Format Virtual Disk Image Generator**: Generates RAW (`.img`), QCOW2 (`.qcow2`), VMDK (`.vmdk`), and VDI (`.vdi`) disk images with embedded FAT32 payloads (`/EFI/BOOT/` and `/boot/omega.elf`).
-- **Omega Virtual Device (OVD) Manager & GUI**: Android-like multi-architecture device manager with schema validation, predefined real-device profiles, ext4 artifact checks, safe lifecycle commands, daemon logs/QMP state, snapshots, import/export, networking/initrd/ephemeral profiles, selectable storage transports, and Tcl/Tk profile-aware management.
+- **Omega Virtual Device (OVD) Manager & GUI**: Android-like multi-architecture device manager with schema validation, predefined real-device profiles, ext4 artifact/digest checks, safe process lifecycle commands, daemon logs/QMP state, snapshots, import/export, networking/initrd/ephemeral profiles, selectable storage transports, a styled VirtualBox-inspired Tkinter manager, and an integrated resilient VNC viewer with keyboard, mouse, framebuffer, and clipboard support.
 - **OVD Real-Device Profile Catalog**: Versioned x86_64, AArch64, and RISC-V profile definitions with deterministic validation/rendering, ext4-default native artifact policy, and explicit Android AVD/VMApple external-adapter classification.
 - **Containerization & CI/CD**: Minimal Alpine-based `Dockerfile`, VSCode DevContainers/Codespaces (`.devcontainer/devcontainer.json`), and GitHub Actions CI/CD (`.github/workflows/ci.yml`).
 
@@ -118,15 +118,15 @@ omega/
 │   ├── README.md                  # OVD manager, profiles, GUI, and tests
 │   ├── profiles/                  # Canonical predefined OVD profile catalog
 │   ├── profile_catalog.py         # Profile validation, rendering, artifacts
-│   ├── libovd.sh                   # Shared OVD validation and lifecycle helpers
-│   ├── ovd_gui.tcl                # Tcl/Tk Omega Virtual Device Manager GUI
-│   ├── ovd_manager.sh             # OVD manager, lifecycle, import/export, snapshots
-│   ├── ovd_run.sh                 # OVD Launcher (display + storage profiles)
-│   ├── test_ovd_unit.sh           # OVD config and dry-run command unit tests
-│   ├── test_profile_catalog.sh     # Profile catalog and artifact dry-run tests
-│   ├── test_profile_ext4_integration.sh # Profile-backed ext4 integration
-│   ├── test_ovd.sh                # OVD lifecycle, storage transport, and boot tests
-│   └── test_ovd_gui.tcl           # Tcl/Tk GUI Unit Test Suite
+│   ├── ovd_core.py                # Cross-platform manager, profiles, lifecycle, QEMU backend
+│   ├── ovd_cli.py                 # Python CLI
+│   ├── ovd_manager.py             # Python manager entry point
+│   ├── ovd_run.py                 # Python launcher entry point
+│   ├── ovd_gui.py                 # Built-in tkinter GUI
+│   ├── profile_catalog.py          # Python-compatible profile catalog entry point
+│   ├── test_ovd_unit.py           # Python OVD manager unit tests
+│   ├── test_profile_catalog.py    # Python profile tests
+│   └── test_profile_ext4_integration.py # Python ext4 profile policy tests
 ├── scripts/
 │   ├── README.md                  # Script catalog, usage, and verification guide
 │   ├── create_bootable_disk.sh    # Configurable multi-arch boot image generator
@@ -136,7 +136,7 @@ omega/
 │   ├── test_display_aarch64.sh    # AArch64 display HAL/fallback smoke test
 │   ├── test_storage_unit.sh       # Host storage API/partition unit tests
 │   ├── test_storage.sh            # Storage unit + all-ISA QEMU integration tests
-│   ├── test_scripts_unit.sh       # Shell-script syntax and launcher unit tests
+│   ├── test_scripts_unit.py       # Python launcher and emulator unit-test entry point
 │   └── test_disk_images.sh        # Disk Image Verification Test Suite
 └── kernel/
     ├── arch/
@@ -182,35 +182,54 @@ docker run -it --rm -v $(pwd):/workspace omega-dev
 
 ### 4. Run Omega Virtual Device (OVD) Manager GUI
 ```bash
-./emulator/ovd_gui.tcl
+python3 -m emulator.ovd_gui
 
 # Or create a generic OVD from the CLI:
-./emulator/ovd_manager.sh create --name <device> --arch x86_64 --storage virtio
-./emulator/ovd_run.sh run --name <device> --gpu --storage virtio
-./emulator/ovd_run.sh run --name <device> --no-gpu --storage virtio
-./emulator/ovd_run.sh run --name <device> --no-gpu --storage usb --dry-run
+python3 -m emulator.ovd_cli create --name <device> --arch x86_64 --storage virtio
+python3 -m emulator.ovd_cli start --name <device> --gpu --storage virtio
+python3 -m emulator.ovd_cli start --name <device> --no-gpu --storage virtio
+python3 -m emulator.ovd_cli start --name <device> --no-gpu --storage usb --dry-run
+python3 -m emulator.ovd_cli machines --arch aarch64
+python3 -m emulator.ovd_cli start --name <device> --vnc 1 --gpu --dry-run
 
 # Or create a native OVD from the predefined profile catalog:
-./emulator/ovd_manager.sh profiles list
-./emulator/ovd_manager.sh profiles show --profile aarch64-virt-development --json
-./emulator/ovd_manager.sh create-from-profile \
+python3 -m emulator.ovd_cli profiles list
+python3 -m emulator.ovd_cli profiles show --profile aarch64-virt-development --json
+python3 -m emulator.ovd_cli create-from-profile \
   --profile aarch64-virt-development --name arm-dev
 ```
 
+The catalog also includes `aarch64-raspi4b-qemu` for the experimental
+Raspberry Pi 4B AArch64 target and conditional ARMv7 board profiles for
+`raspi1ap`, `raspi0`, `bpim2u`, and `orangepi-pc`. The ARMv7 profiles are
+available for machine/profile inspection, but native creation waits for an
+Omega ARMv7 kernel and board-specific boot artifacts.
+
 OVD storage profiles are selectable at launch: `virtio`, `ahci`, `usb`,
-`sd`, `optical`, or `none`. The profile controls the QEMU transport and
-device model for generic OVDs. Generic instances use `userdata.img`; native
-catalog profiles use a verified ext4 `system.ext4` image and resolve the
-latest compatible Omega kernel before launch. Existing profile-backed OVDs
-refresh their local image when the verified profile artifact changes.
+`sd`, `optical`, or `none`. The profile controls the QEMU machine, transport,
+and device model. The manager can query each installed QEMU binary using its
+`-machine help` catalog. Generic instances use `userdata.img` and automatically
+copy an architecture-matched bootable Omega image when one is available;
+profile-backed instances prefer verified ext4 images and otherwise use an
+explicitly marked bootable image. Creation fails closed when no bootable image
+is available; use `--allow-blank` only for non-bootable test media.
 Use `profiles artifacts --profile PROFILE --dry-run` to inspect artifact
 resolution without modifying the workspace.
 
-The GUI supports profile discovery, catalog-default RAM/disk values, profile
-inspection, ext4 artifact checks, profile-backed creation, generic creation,
-launch, stop, validation, logs, and deletion. Android AVD and VMApple profiles
-are inspectable external-adapter profiles and cannot currently be created as
-native OVDs.
+The GUI supports profile discovery, QEMU machine selection, catalog-default
+RAM/disk values, kernel build/refresh, readiness diagnostics, profile
+inspection, artifact checks, profile-backed creation, generic creation, launch,
+stop, validation, command preview, live logs, deletion, and an integrated
+Tkinter VNC viewer with long-lived idle sessions, background connection
+retries, composited framebuffer updates, keyboard, mouse, wheel, and
+clipboard integration. Android
+AVD and VMApple profiles are inspectable external-adapter profiles and cannot
+currently be created as native OVDs.
+
+The VNC viewer is intended for local QEMU development and binds to
+`127.0.0.1`. It supports QEMU's unauthenticated local RFB mode, but does not
+provide VNC password authentication or TLS. See
+[`emulator/README.md`](emulator/README.md) for the complete GUI and VNC guide.
 
 The default Omega system filesystem is ext4. FAT32 is reserved for optional
 boot/EFI compatibility use. Ext4 image creation requires `mke2fs` or
@@ -225,13 +244,13 @@ QMP, and GUI guide, see [`emulator/README.md`](emulator/README.md).
 ./scripts/test_display_aarch64.sh # AArch64 display HAL and serial-fallback smoke test
 ./scripts/test_storage_unit.sh # Host storage API and partition unit tests
 ./scripts/test_storage.sh      # Storage tests on x86_64, AArch64, and RISC-V
-./scripts/test_scripts_unit.sh # Shell-script and dry-run launcher unit tests
+python3 scripts/test_scripts_unit.py # Python emulator manager and dry-run unit tests
 ./scripts/test_disk_images.sh   # Bootable disk image tests
-./emulator/test_ovd_unit.sh     # OVD configuration and storage profile unit tests
-./emulator/test_profile_catalog.sh # Profile catalog, defaults, and artifact tests
-./emulator/test_profile_ext4_integration.sh # Profile-backed ext4 image/OVD test
-./emulator/test_ovd.sh          # OVD lifecycle, storage profiles, and display verification
-tclsh emulator/test_ovd_gui.tcl # OVD Tcl/Tk GUI unit tests
+python3 -m unittest emulator.test_ovd_unit # OVD configuration and lifecycle tests
+python3 -m unittest emulator.test_profile_catalog # Profile catalog tests
+python3 -m unittest emulator.test_profile_ext4_integration # Profile-backed ext4 policy tests
+python3 -m unittest emulator.test_vnc # VNC protocol, framebuffer, input, and clipboard tests
+python3 -m emulator.ovd_gui # Launch the tkinter GUI
 ```
 
 The full test runner reuses existing build directories and intentionally
@@ -242,7 +261,7 @@ generation or destructive test workflows:
 ```bash
 export OMEGA_BUILD_ROOT="$PWD/.omega-test/build"
 export OMEGA_IMAGE_ROOT="$PWD/.omega-test/images"
-./scripts/test_scripts_unit.sh
+python3 scripts/test_scripts_unit.py
 ```
 
 ---

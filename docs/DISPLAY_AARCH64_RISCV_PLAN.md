@@ -29,7 +29,7 @@ The SDM on ARM/RISC-V is deliberately **framebuffer-first** (no VGA text mode):
 - SimpleFb pixel read/write self-tests are implemented and run when a valid framebuffer is present.
 - `scripts/test_display_aarch64.sh` validates AArch64 boot, the display HAL marker, console routing, and idle-loop completion.
 - RISC-V 64 now reaches `kernel_main()` after the OpenSBI handoff, boot-section, and PMM bootstrap fixes.
-- OVD `ovd_run.sh --gpu` launches AArch64 with `-device virtio-gpu-pci`.
+- OVD `python3 -m emulator.ovd_cli start --gpu` launches AArch64 with `-device virtio-gpu-pci`.
 
 ---
 
@@ -287,7 +287,7 @@ kernel/
 | **7.2b.4b** | GET_DISPLAY_INFO + RESOURCE_CREATE_2D | `virtio_gpu.cpp` | Command path implemented; completion validation pending |
 | **7.2b.4c** | SET_SCANOUT + pixel write | `virtio_gpu.cpp` | Command path implemented; visible scanout validation pending |
 | **7.2b.4d** | Backend priority over SimpleFb when device is verified | `display.cpp` init | Integration hook implemented; default remains guarded |
-| **7.2b.4e** | OVD `--gpu` for AArch64 | `ovd_run.sh` | Deferred until PCI/MMIO queue validation |
+| **7.2b.4e** | OVD `--gpu` for AArch64 | `python3 -m emulator.ovd_cli start` | Deferred until PCI/MMIO queue validation |
 
 ### Phase 7.2b.5 — Hardening
 
@@ -308,8 +308,8 @@ kernel/
 | AArch64 serial + DT FB | `qemu-system-aarch64 -M virt -cpu cortex-a57 -nographic -kernel omega.elf` | SimpleFb when firmware supplies DT FB; otherwise serial fallback |
 | AArch64 VirtIO-GPU GUI | `... -device virtio-gpu-pci -display sdl` | Planned after PCI ECAM transport |
 | RISC-V serial + DT FB | `qemu-system-riscv64 -M virt -cpu rv64 -bios default -nographic -kernel omega.elf` | SimpleFb when firmware supplies DT FB; otherwise serial fallback |
-| OVD AArch64 headless | `ovd_run.sh run --name tablet --no-gpu` | SimpleFb or serial |
-| OVD AArch64 GUI | `ovd_run.sh run --name tablet --gpu` | VirtioGpu |
+| OVD AArch64 headless | `python3 -m emulator.ovd_cli start --name tablet --no-gpu` | SimpleFb or serial |
+| OVD AArch64 GUI | `python3 -m emulator.ovd_cli start --name tablet --gpu` | VirtioGpu |
 
 ### 8.2 Automated Tests
 
@@ -346,7 +346,7 @@ kernel/
 
 ## 9. OVD Integration
 
-Extend `emulator/ovd_manager.sh` config:
+The Python OVD manager stores the equivalent display selection in `config.ini`:
 
 ```ini
 ovd.vga=std          # x86_64 — existing
@@ -354,7 +354,7 @@ ovd.vga=simplefb     # AArch64/RISC-V default headless
 ovd.vga=virtio-gpu   # AArch64/RISC-V GUI
 ```
 
-Extend `emulator/ovd_run.sh`:
+Use the cross-platform Python launcher:
 
 | Arch | `--no-gpu` | `--gpu` |
 | :--- | :--- | :--- |
