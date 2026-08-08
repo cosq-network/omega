@@ -2,12 +2,23 @@
 build/
 bin/
 out/
+
+# Compiled and generated executable artifacts
 *.elf
 *.bin
 *.iso
 *.o
 *.obj
 *.a
+
+# Generated virtual disk images
+*.img
+*.raw
+*.qcow2
+*.vdi
+*.vmdk
+*.vhd
+*.vhdx
 
 # CMake Generated Files & Cache
 CMakeFiles/
