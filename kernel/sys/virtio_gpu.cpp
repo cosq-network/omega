@@ -60,7 +60,7 @@ struct QueueMemory {
     UsedElem used_ring[GPU_QUEUE_SIZE];
     uint16_t used_avail_event;
     // Legacy VirtIO places the device ring on the next page boundary.
-    uint8_t legacy_padding[4096 - 224];
+    uint8_t legacy_padding[4096 - 222];
     uint16_t legacy_used_flags;
     uint16_t legacy_used_idx;
     UsedElem legacy_used_ring[GPU_QUEUE_SIZE];
@@ -203,29 +203,13 @@ bool init(hal::FramebufferInfo* out) {
     return false;
 #else
     active = false;
-    bool fdt_device_seen = false;
-    for (uint32_t ordinal=0; ordinal<16; ++ordinal) {
+    for (uint32_t ordinal=0; ordinal<64; ++ordinal) {
         fdt::VirtioMmioDevice device{};
         if (!fdt::find_virtio_mmio(&device, ordinal)) break;
-        fdt_device_seen = true;
         if (!probe_base(device.phys_addr)) continue;
         if (!get_display_info() || !create_scanout()) continue;
         zero(backing, static_cast<size_t>(width)*height*4);
-        out->phys_addr=reinterpret_cast<uintptr_t>(backing); out->virt_addr=out->phys_addr;
-        out->width=width; out->height=height; out->pitch=width*4; out->bpp=32;
-        out->red_mask=0xFF; out->green_mask=0xFF; out->blue_mask=0xFF; out->red_shift=16; out->green_shift=8; out->blue_shift=0;
-        active = true; return true;
-    }
-    // QEMU virt places optional virtio-mmio transports in this architecturally
-    // reserved window. This fallback supports devices added after firmware DT
-    // creation (for example -device virtio-gpu-device).
-    if (fdt_device_seen) return false;
-    for (uint32_t slot = 0; slot < 32; ++slot) {
-        const uintptr_t base = 0x0A000000ull + static_cast<uintptr_t>(slot) * 0x200ull;
-        if (!probe_base(base)) continue;
-        if (!get_display_info() || !create_scanout()) continue;
-        zero(backing, static_cast<size_t>(width)*height*4);
-        out->phys_addr=reinterpret_cast<uintptr_t>(backing); out->virt_addr=out->phys_addr;
+        out->phys_addr=reinterpret_cast<uintptr_t>(backing); out->virt_addr=out->phys_addr; out->size=static_cast<uint64_t>(width)*height*4;
         out->width=width; out->height=height; out->pitch=width*4; out->bpp=32;
         out->red_mask=0xFF; out->green_mask=0xFF; out->blue_mask=0xFF; out->red_shift=16; out->green_shift=8; out->blue_shift=0;
         active = true; return true;
@@ -243,6 +227,13 @@ bool flush() {
     return submit(&flush_cmd,sizeof(flush_cmd),&reply,sizeof(reply)) && command_ok(reply.type);
 }
 
-bool self_test() { return active && width != 0 && height != 0; }
+bool self_test() {
+    if (!active || width == 0 || height == 0) return false;
+    backing[0] = 0xFF;
+    backing[1] = 0x00;
+    backing[2] = 0x00;
+    backing[3] = 0xFF;
+    return flush();
+}
 
 } // namespace virtio_gpu

@@ -18,6 +18,13 @@ static uint16_t make_cell(char c, uint8_t attr) {
 }
 
 bool text_buffer_accessible() {
+    const uint8_t original_cursor = crtc_read(0x0F);
+    crtc_write(0x0F, 0x55);
+    const bool low_ok = crtc_read(0x0F) == 0x55;
+    crtc_write(0x0F, 0xAA);
+    const bool high_ok = crtc_read(0x0F) == 0xAA;
+    crtc_write(0x0F, original_cursor);
+    if (!low_ok || !high_ok) return false;
     volatile uint16_t* buf = text_buffer();
     const uint16_t original = buf[0];
     buf[0] = make_cell('T', 0x07);

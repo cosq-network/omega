@@ -40,7 +40,7 @@
 - **PCI Bus Scanner**: Bus configuration space reader (`0xCF8` Address / `0xCFC` Data ports) enumerating vendor/device IDs across 256 PCI buses.
 - **VirtIO Network Stack**: VirtIO-Net packet reader, Ethernet L2, IPv4 L3, and UDP/TCP L4 stack headers.
 - **System Display Module (x86_64 Standard VGA)**: Layered display HAL with VGA text mode (80×25 at `0xB8000`), Bochs VBE linear framebuffer (1024×768×32 via DISPI), Multiboot2 framebuffer handoff, 8×16 bitmap font, and a kernel graphical console. `kprintf` output is mirrored to serial (COM1) and the active display backend concurrently.
-- **AArch64/RISC-V Display Integration**: Shared FDT walker and boot-pointer handoff, Device Tree `simple-framebuffer` HALs, pixel-format metadata, portable framebuffer console routing, and safe serial fallback. An opt-in VirtIO-GPU MMIO 2D bring-up path is included with `-DENABLE_EXPERIMENTAL_VIRTIO_GPU=ON`.
+- **AArch64/RISC-V Display Integration**: Shared FDT walker and validated framebuffer metadata, format-aware portable framebuffer rendering, identity-map safety bounds, serial fallback, and an opt-in VirtIO-GPU MMIO 2D bring-up path with bounded failure behavior.
 - **Cross-Architecture Storage Foundation**: Common block requests, device lifecycle and driver registration, DMA mapping, GPT/MBR parsing, writable/read-only policy, flush/barrier handling, and a synthetic block backend verified on x86_64, AArch64, and RISC-V.
 - **VirtIO-Block Path**: Opt-in x86_64 transitional VirtIO-PCI discovery with legacy queue geometry, feature negotiation, and verified read/write/flush completion; AArch64/RISC-V VirtIO-MMIO remains experimental. Enable with `-DENABLE_EXPERIMENTAL_VIRTIO_BLOCK=ON`.
 - **Firmware & Bootloader Compatibility**: Compatible with **UEFI/GPT**, **U-Boot** (`bootefi` / `booti`), and **Coreboot** (TianoCore / GRUB).
@@ -151,6 +151,10 @@ omega/
 │   ├── test.sh                    # Non-destructive multi-arch regression suite
 │   ├── test_display.sh            # VGA / System Display Module test matrix
 │   ├── test_display_aarch64.sh    # AArch64 display HAL/fallback smoke test
+│   ├── test_display_riscv64.sh    # RISC-V display HAL/fallback smoke test
+│   ├── test_display_gpu.sh         # Experimental VirtIO-GPU safe-probe test
+│   ├── test_display_unit.sh         # Framebuffer format/bounds unit test
+│   ├── test_boot_framebuffer_unit.sh # Multiboot framebuffer parser unit test
 │   ├── test_storage_unit.sh       # Host storage API/partition unit tests
 │   ├── test_input_unit.sh         # Input ABI and decoder unit tests
 │   ├── test_storage.sh            # Storage unit + all-ISA QEMU integration tests
@@ -264,6 +268,9 @@ QMP, and GUI guide, see [`emulator/README.md`](emulator/README.md).
 ./scripts/test.sh               # Multi-arch integration tests (includes test_display.sh)
 ./scripts/test_display.sh     # VGA display matrix: Bochs VBE, VgaText fallback, self-tests
 ./scripts/test_display_aarch64.sh # AArch64 display HAL and serial-fallback smoke test
+./scripts/test_display_riscv64.sh # RISC-V display HAL and serial-fallback smoke test
+./scripts/test_display_unit.sh # Framebuffer format and bounds unit tests
+./scripts/test_boot_framebuffer_unit.sh # Multiboot framebuffer parser unit tests
 ./scripts/test_storage_unit.sh # Host storage API and partition unit tests
 ./scripts/test_storage.sh      # Storage tests on x86_64, AArch64, and RISC-V
 ./scripts/test_process.sh      # x86_64 process page-table/mapping isolation

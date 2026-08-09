@@ -1,5 +1,6 @@
 #include "arch/display.hpp"
 #include "kernel/fdt.hpp"
+#include "kernel/framebuffer.hpp"
 #include "kernel/kprint.hpp"
 #include "kernel/vmm.hpp"
 #include "kernel/virtio_gpu.hpp"
@@ -11,9 +12,13 @@ alignas(8) static FramebufferInfo fb_info{};
 alignas(8) static DisplayCapabilities caps{};
 
 static bool map_framebuffer(FramebufferInfo* info, uint64_t size) {
-    if (info == nullptr || info->phys_addr == 0 || info->width == 0 || info->height == 0) return false;
-    const uint32_t pitch = info->pitch != 0 ? info->pitch : info->width * (info->bpp / 8);
+    if (info == nullptr || info->phys_addr == 0 || info->width == 0 || info->height == 0 ||
+        (info->bpp != 8 && info->bpp != 15 && info->bpp != 16 && info->bpp != 24 && info->bpp != 32)) return false;
+    const uint32_t bytes_per_pixel = (info->bpp + 7) / 8;
+    const uint32_t pitch = info->pitch != 0 ? info->pitch : info->width * bytes_per_pixel;
+    if (pitch < info->width * bytes_per_pixel) return false;
     const uint64_t bytes = static_cast<uint64_t>(pitch) * info->height;
+    if (bytes == 0 || info->phys_addr > 0x40000000ull || bytes > 0x40000000ull - info->phys_addr) return false;
     if (size != 0 && bytes > size) return false;
     const uintptr_t page_mask = 0xFFF;
     const uintptr_t first = info->phys_addr & ~page_mask;
@@ -22,6 +27,7 @@ static bool map_framebuffer(FramebufferInfo* info, uint64_t size) {
     (void)last;
     info->virt_addr = info->phys_addr; // MMU is identity-mapped during current QEMU bring-up.
     info->pitch = pitch;
+    info->size = bytes;
     return true;
 }
 
@@ -67,9 +73,7 @@ bool Display::run_self_tests() {
         kernel::kprintf("[TEST][SKIP] SimpleFb (no linear framebuffer)\n");
         return true;
     }
-    volatile uint8_t* pixel = reinterpret_cast<volatile uint8_t*>(fb_info.virt_addr);
-    const uint8_t saved = pixel[0]; pixel[0] = 0x5A;
-    const bool pass = pixel[0] == 0x5A; pixel[0] = saved;
+    const bool pass = display::framebuffer_self_test();
     kernel::kprintf("[TEST][%s] SimpleFb pixel read/write\n", pass ? "PASS" : "FAIL");
     return pass;
 }

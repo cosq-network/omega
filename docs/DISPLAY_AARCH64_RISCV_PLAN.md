@@ -13,7 +13,7 @@
 
 ## 1. Executive Summary
 
-Phase 7.2 delivered the **System Display Module (SDM)** on **x86_64** using Standard VGA (text mode + Bochs VBE). The AArch64 and RISC-V 64 SimpleFb integration slice is implemented: both architectures have real display HALs, shared FDT parsing, boot-time DT pointer handoff, portable console initialization, and safe serial fallback. A guarded VirtIO-GPU MMIO 2D foundation has now been added; production activation still requires verified queue completion and PCI ECAM support.
+Phase 7.2 delivered the **System Display Module (SDM)** on **x86_64** using Standard VGA (text mode + Bochs VBE). The AArch64 and RISC-V 64 SimpleFb integration slice is implemented: both architectures have real display HALs, validated FDT parsing, portable format-aware console initialization, bounded identity-map framebuffer access, and safe serial fallback. A guarded VirtIO-GPU MMIO 2D foundation has bounded queue completion and scanout self-tests; it remains opt-in and requires a valid firmware-provided DTB because blind probing of unmapped MMIO is unsafe.
 
 This plan specifies how to extend the SDM to **AArch64** and **RISC-V 64** without rewriting the portable console, font, or `kprintf` routing layers. The same `hal::Display` → `display::Console` → `framebuffer.cpp` stack used on x86_64 applies; only arch-specific **backend probe**, **framebuffer mapping**, and **mode setup** differ.
 
@@ -155,7 +155,7 @@ VirtIO-GPU is the long-term paravirtual display for QEMU `virt` and cloud/VM dep
 9. VIRTIO_GPU_CMD_TRANSFER_TO_HOST + RESOURCE_FLUSH (when partial updates needed)
 ```
 
-**Current implementation:** `kernel/sys/virtio_gpu.cpp` contains MMIO discovery, feature negotiation, split-queue setup, display-info/resource/scanout commands, backing storage, and flush. It is enabled explicitly with `-DENABLE_EXPERIMENTAL_VIRTIO_GPU=ON`; the default build keeps the probe disabled so a malformed or incomplete early-boot queue cannot stall the kernel. PCI ECAM transport and a reusable transport abstraction remain to be completed.
+**Current implementation:** `kernel/sys/virtio_gpu.cpp` contains MMIO discovery, feature negotiation, split-queue setup, display-info/resource/scanout commands, backing storage, bounded completion waits, and flush self-tests. It is enabled explicitly with `-DENABLE_EXPERIMENTAL_VIRTIO_GPU=ON`; the default build keeps the probe disabled. The implementation never scans arbitrary MMIO addresses when no valid DTB is available and falls back to serial output. PCI ECAM transport and a reusable transport abstraction remain to be completed.
 
 ### 4.3 Boot Framebuffer Handoff (`BootFramebuffer`)
 

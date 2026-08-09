@@ -149,6 +149,13 @@ echo -e "\n[*] Running AArch64 display HAL test suite..."
 chmod +x "${PROJECT_ROOT}/scripts/test_display_aarch64.sh"
 bash "${PROJECT_ROOT}/scripts/test_display_aarch64.sh"
 
+echo -e "\n[*] Running RISC-V display HAL test suite..."
+chmod +x "${PROJECT_ROOT}/scripts/test_display_riscv64.sh"
+bash "${PROJECT_ROOT}/scripts/test_display_riscv64.sh"
+bash "${PROJECT_ROOT}/scripts/test_display_gpu.sh"
+bash "${PROJECT_ROOT}/scripts/test_display_unit.sh"
+bash "${PROJECT_ROOT}/scripts/test_boot_framebuffer_unit.sh"
+
 echo -e "\n[*] Running storage unit and integration test suite..."
 bash "${PROJECT_ROOT}/scripts/test_storage.sh"
 bash "${PROJECT_ROOT}/scripts/test_ext4_unit.sh"

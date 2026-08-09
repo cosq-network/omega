@@ -23,8 +23,12 @@ the toolchain files in `cmake/` and target `x86_64`, `aarch64`, and `riscv64`.
 | `test.sh` | Full multi-architecture, display, storage, script, and OVD regression suite | Yes: build/test logs and temporary OVD state |
 | `test_display.sh` | x86_64 Bochs VBE and VGA text-mode matrix | Build output and temporary QEMU logs |
 | `test_display_aarch64.sh` | AArch64 display HAL and serial fallback smoke test | Build output and temporary QEMU logs |
+| `test_display_riscv64.sh` | RISC-V display HAL and serial fallback smoke test | Build output and temporary QEMU logs |
+| `test_display_gpu.sh` | Experimental VirtIO-GPU build and safe-probe integration test | Build output and temporary QEMU logs |
 | `test_storage_unit.sh` | Host-side storage API, write-policy, and partition parser unit tests | `build/storage-tests/` |
 | `test_input_unit.sh` | Host-side input ABI, queue, HID boot decoder, and PS/2 decoder unit tests | `build/input-tests/` |
+| `test_display_unit.sh` | Host-side framebuffer pixel-format and bounds unit tests | `build/display-tests/` |
+| `test_boot_framebuffer_unit.sh` | Host-side Multiboot framebuffer handoff parser unit tests | `build/boot-framebuffer-tests/` |
 | `test_storage.sh` | Storage unit tests, all-ISA boot tests, x86_64 transitional VirtIO-Block runtime completion, and AArch64/RISC-V VirtIO-Block builds | Build output and temporary QEMU logs |
 | `test_process.sh` | x86_64 process page-table creation and independent anonymous mapping test | `build/process-x86_64/` |
 | `test_security.sh` | Linux UID/GID, supplementary-group, mode, and VFS permission tests | `build/security-tests/` |

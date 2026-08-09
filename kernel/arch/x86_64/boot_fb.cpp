@@ -1,11 +1,11 @@
 #include "vga_internal.hpp"
 
 extern "C" uint64_t multiboot_info_ptr;
+extern "C" uint32_t multiboot_boot_magic;
 
 namespace hal {
 namespace vga {
 
-static constexpr uint32_t MULTIBOOT2_MAGIC         = 0x36D76289;
 static constexpr uint32_t MULTIBOOT_TAG_TYPE_END   = 0;
 static constexpr uint32_t MULTIBOOT_TAG_TYPE_FB    = 8;
 
@@ -26,12 +26,13 @@ BootFramebufferResult boot_framebuffer_probe() {
         return result;
     }
 
-    const auto* info = reinterpret_cast<const uint32_t*>(multiboot_info_ptr);
-    if (info[0] != MULTIBOOT2_MAGIC) {
+    if (multiboot_boot_magic != 0x36D76289u) {
         return result;
     }
+    const auto* info = reinterpret_cast<const uint32_t*>(multiboot_info_ptr);
 
-    const uint32_t total_size = info[1];
+    const uint32_t total_size = info[0];
+    if (total_size < 16 || total_size > 16u * 1024u * 1024u) return result;
     uint32_t offset = 8;
 
     while (offset + sizeof(Multiboot2Tag) <= total_size) {
@@ -40,7 +41,8 @@ BootFramebufferResult boot_framebuffer_probe() {
             break;
         }
 
-        if (tag->type == MULTIBOOT_TAG_TYPE_FB && tag->size >= 32) {
+        if (tag->type == MULTIBOOT_TAG_TYPE_FB && tag->size >= 40 &&
+            tag->size <= total_size - offset) {
             const uint8_t* data = tag_payload(tag);
             const uint64_t addr =
                 static_cast<uint64_t>(data[0]) |
@@ -68,8 +70,12 @@ BootFramebufferResult boot_framebuffer_probe() {
                                     (static_cast<uint32_t>(data[19]) << 24);
 
             const uint8_t bpp = data[20];
+            const uint8_t type = data[21];
 
-            if (addr != 0 && width > 0 && height > 0 && bpp >= 8) {
+            if (type == 1 && addr != 0 && width > 0 && height > 0 &&
+                (bpp == 15 || bpp == 16 || bpp == 24 || bpp == 32) &&
+                pitch >= width * ((bpp + 7) / 8) &&
+                static_cast<uint64_t>(pitch) * height <= 0x100000000ull - addr) {
                 result.valid = true;
                 result.info.phys_addr  = static_cast<uintptr_t>(addr);
                 result.info.virt_addr = static_cast<uintptr_t>(addr);
@@ -77,9 +83,13 @@ BootFramebufferResult boot_framebuffer_probe() {
                 result.info.height    = height;
                 result.info.pitch     = pitch != 0 ? pitch : width * (bpp / 8);
                 result.info.bpp       = bpp;
-                result.info.red_mask  = 0xFF;
-                result.info.green_mask = 0xFF;
-                result.info.blue_mask = 0xFF;
+                result.info.size      = static_cast<uint64_t>(pitch) * height;
+                result.info.red_shift = data[24];
+                result.info.red_mask  = data[25];
+                result.info.green_shift = data[26];
+                result.info.green_mask = data[27];
+                result.info.blue_shift = data[28];
+                result.info.blue_mask = data[29];
                 return result;
             }
         }

@@ -25,8 +25,8 @@ static inline uint16_t inw(uint16_t port) {
 
 void wait_for_vsync() {
     /* Input Status Register 1 — wait for vertical retrace (bit 0 clear then set). */
-    while ((inb(0x3DA) & 0x08) == 0) { }
-    while ((inb(0x3DA) & 0x08) != 0) { }
+    for (uint32_t i = 0; i < 100000; ++i) if ((inb(0x3DA) & 0x08) != 0) break;
+    for (uint32_t i = 0; i < 100000; ++i) if ((inb(0x3DA) & 0x08) == 0) break;
 }
 
 void crtc_write(uint8_t index, uint8_t value) {

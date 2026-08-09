@@ -46,6 +46,11 @@ static uintptr_t read_bar0(uint8_t bus, uint8_t dev) {
     if (bar == 0 || bar == 0xFFFFFFFF) {
         return 0xFD000000; /* Common QEMU default when BAR is unset. */
     }
+    const uint32_t type = (bar >> 1) & 3u;
+    if (type == 2) {
+        const uint64_t high = PciBus::read_config_32(bus, dev, 0, 0x14);
+        return static_cast<uintptr_t>((high << 32) | (bar & ~0xFULL));
+    }
     return static_cast<uintptr_t>(bar & ~0xFULL);
 }
 
@@ -67,6 +72,9 @@ bool bochs_probe(uintptr_t* out_fb_phys) {
     }
 
     if (pci_found) {
+        const uint16_t command = PciBus::read_config_16(bus, dev, 0, 0x04);
+        PciBus::write_config_16(bus, dev, 0, 0x04,
+                                static_cast<uint16_t>(command | 0x0002u | 0x0004u));
         *out_fb_phys = read_bar0(bus, dev);
     } else {
         *out_fb_phys = 0xFD000000;
@@ -100,6 +108,7 @@ bool bochs_set_mode(uint32_t width, uint32_t height, uint8_t bpp, FramebufferInf
 
     out->phys_addr   = fb_phys;
     out->virt_addr   = fb_phys;
+    out->size        = static_cast<uint64_t>(width * (bpp / 8)) * height;
     out->width       = width;
     out->height      = height;
     out->pitch       = width * (bpp / 8);

@@ -64,6 +64,9 @@ pd3:
 .global multiboot_info_ptr
 multiboot_info_ptr:
     .skip 8
+.global multiboot_boot_magic
+multiboot_boot_magic:
+    .skip 4
 
 .align 16
 stack_bottom:
@@ -94,6 +97,7 @@ _start:
     cmpl $MULTIBOOT2_BOOT_MAGIC, %eax
     jne 1f
     mov %ebx, (multiboot_info_ptr)
+    mov %eax, (multiboot_boot_magic)
 1:
 
     /* pml4[0] -> pdpt */
@@ -168,8 +172,8 @@ long_mode_start:
     mov %ax, %gs
     mov %ax, %ss
 
-    /* Jump to C++ Kernel Main */
-    xor %edi, %edi
+    /* Pass the validated Multiboot information pointer to C++. */
+    mov multiboot_info_ptr(%rip), %edi
     call kernel_main
 
 1:  hlt

@@ -12,6 +12,8 @@ bool map_framebuffer(FramebufferInfo* info) {
 
     const uint32_t pitch = info->pitch != 0 ? info->pitch : info->width * (info->bpp / 8);
     const size_t bytes = static_cast<size_t>(pitch) * info->height;
+    if (info->width == 0 || info->bpp < 8 || bytes == 0 ||
+        info->phys_addr > 0xFFFFFFFFull || bytes > 0x100000000ull - info->phys_addr) return false;
 
     /* Boot page tables identity-map the low 4 GiB; verify the FB window is accessible. */
     auto* probe = reinterpret_cast<volatile uint32_t*>(info->phys_addr);
@@ -24,6 +26,7 @@ bool map_framebuffer(FramebufferInfo* info) {
 
     (void)bytes;
     info->virt_addr = info->phys_addr;
+    info->size = bytes;
     info->pitch = pitch;
     return true;
 }
@@ -163,8 +166,10 @@ bool Display::run_self_tests() {
         } else {
             kernel::kprintf("[TEST][PASS] VGA text buffer read/write\n");
         }
-    } else {
+    } else if (caps.linear_framebuffer) {
         kernel::kprintf("[TEST][SKIP] VGA text buffer (linear framebuffer active)\n");
+    } else {
+        kernel::kprintf("[TEST][SKIP] VGA text buffer (no VGA backend)\n");
     }
 
     if (caps.linear_framebuffer && fb_info.phys_addr != 0) {
@@ -175,7 +180,9 @@ bool Display::run_self_tests() {
             kernel::kprintf("[TEST][PASS] Bochs VBE DISPI register readback\n");
         }
 
-        if (vga::bochs_self_test(fb_info.phys_addr)) {
+        if (active != DisplayBackend::BochsVbe) {
+            kernel::kprintf("[TEST][SKIP] Bochs VBE linear framebuffer pixel\n");
+        } else if (vga::bochs_self_test(fb_info.phys_addr)) {
             kernel::kprintf("[TEST][PASS] Bochs VBE linear framebuffer pixel\n");
         } else {
             kernel::kprintf("[TEST][FAIL] Bochs VBE linear framebuffer pixel\n");

@@ -15,6 +15,13 @@
 
 This plan specifies how **Omega** will implement a **System Display Module (SDM)** built around **Standard VGA** hardware and its modern extensions. The module provides the first graphical output path for laptops and desktops before a full GPU driver stack (Adreno, Intel, AMD) exists.
 
+The current implementation preserves the Multiboot2 boot magic and
+information pointer across x86_64 mode entry, validates the complete
+low-memory framebuffer window before use, supports 64-bit PCI BARs, and fails
+closed for framebuffer addresses outside the current identity-map range. VGA
+text detection requires a CRTC register round trip; writable RAM at `0xB8000`
+alone is not treated as a display device.
+
 The SDM is deliberately layered:
 
 1. **VGA Text Mode** — immediate, zero-setup boot messages (80×25 character console).

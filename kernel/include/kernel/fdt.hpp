@@ -28,6 +28,7 @@ struct VirtioMmioDevice {
 
 uintptr_t boot_pointer();
 void set_boot_pointer(uintptr_t pointer);
+bool is_valid_blob(uintptr_t pointer);
 bool find_simple_framebuffer(SimpleFramebuffer* out);
 bool find_virtio_mmio(VirtioMmioDevice* out, uint32_t ordinal = 0);
 

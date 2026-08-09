@@ -219,7 +219,7 @@ The **System Display Module (SDM)** is implemented for PC-class VGA hardware in 
 | **7.2c Bootloader FB Handoff** | `COMPLETED` | Multiboot2 framebuffer request tag in `boot.s`, tag type 8 parser |
 | **7.2d Hardening & CI** | `COMPLETED` | In-kernel self-tests, `scripts/test_display.sh`, OVD `-vga std` integration |
 
-**Deferred from Phase 7.2:** VirtIO-GPU (→ 7.2b), VMware SVGA, UEFI GOP EFI stub, full ANSI escape subset, SMP display spinlock.
+**Deferred from Phase 7.2:** VMware SVGA, UEFI GOP EFI stub, full ANSI escape subset, SMP display spinlock, and production-grade userspace display services.
 
 ### Phase 7.2b In Progress (AArch64 & RISC-V 64 Display)
 
@@ -228,14 +228,18 @@ Extends the SDM to non-x86 targets using **framebuffer-first** backends (no VGA 
 | Sub-milestone | Status | Deliverable |
 | :--- | :---: | :--- |
 | **7.2b.1 FDT Infrastructure** | `COMPLETED` | Shared `kernel/sys/fdt.cpp` walker; DT pointer capture through AArch64 `x0` and RISC-V OpenSBI `a1` |
-| **7.2b.2 SimpleFb (AArch64)** | `COMPLETED*` | SimpleFb backend, format metadata, shared console routing, safe serial fallback, and pixel self-test path |
-| **7.2b.3 SimpleFb (RISC-V)** | `COMPLETED*` | Correct OpenSBI entry placement, PMM bootstrap storage, display HAL, and portable console integration |
-| **7.2b.4 VirtIO-GPU** | `IN PROGRESS` | Shared GPU protocol and MMIO discovery scaffold; activation remains opt-in pending verified queue completion |
-| **7.2b.5 CI & Hardening** | `IN PROGRESS` | `scripts/test_display_aarch64.sh`, integration assertions, pixel-format dispatch; real framebuffer CI pending |
+| **7.2b.2 SimpleFb (AArch64)** | `COMPLETED*` | Validated FDT SimpleFb metadata, format-aware rendering, bounded identity-map bring-up, shared console routing, safe serial fallback, and pixel self-test path |
+| **7.2b.3 SimpleFb (RISC-V)** | `COMPLETED*` | Validated FDT SimpleFb metadata, format-aware rendering, bounded identity-map bring-up, display HAL, and portable console integration |
+| **7.2b.4 VirtIO-GPU** | `HARDENING` | Experimental protocol/queue foundation, bounded FDT-only MMIO discovery, scanout flush self-test, and fail-safe serial fallback; active queue completion validation remains pending |
+| **7.2b.5 CI & Hardening** | `PARTIAL` | x86_64/AArch64/RISC-V display tests, framebuffer and Multiboot parser unit tests, VGA matrix, and safe experimental-GPU boot test; real framebuffer CI remains pending |
 
 \* QEMU's default `virt` configuration in the current environment does not expose a DT `simple-framebuffer` node, so the validated path uses serial fallback; a real DT framebuffer activates the same SimpleFb backend.
 
-**Current state:** AArch64 and RISC-V use real `display.cpp` HALs rather than stubs. Shared display initialization runs on all architectures after PMM/VMM, and RISC-V reaches `kernel_main()` under OpenSBI. The current framebuffer mapping is an identity-map QEMU bring-up path; a full architecture-specific VMM is still required for arbitrary physical framebuffer addresses. VirtIO-MMIO discovery, feature negotiation, queue layout, and the 2D command sequence now exist in `kernel/sys/virtio_gpu.cpp`, but activation is guarded by `ENABLE_EXPERIMENTAL_VIRTIO_GPU` until queue completion is validated without risking early boot. PCI ECAM transport and userspace display capabilities remain next milestones.
+**Current state:** AArch64 and RISC-V use real `display.cpp` HALs rather than stubs. Shared display initialization runs on all architectures after PMM/VMM, and RISC-V reaches `kernel_main()` under OpenSBI. Multiboot2, FDT, VGA text, Bochs VBE, and SimpleFb paths now validate framebuffer ranges, pitches, supported formats, and pixel writes before use. The current non-x86 framebuffer mapping is an identity-map QEMU bring-up path with explicit address limits; a full architecture-specific VMM is still required for arbitrary physical framebuffer addresses.
+
+VirtIO-GPU discovery is now restricted to validated FDT VirtIO-MMIO nodes; the previous blind fixed-address scan has been removed. Queue geometry, feature negotiation, 2D command construction, bounded completion, backing-buffer transfer, and resource flush paths are hardened, and the display console batches GPU flushes at line boundaries. `ENABLE_EXPERIMENTAL_VIRTIO_GPU` remains opt-in until active queue completion is validated through a firmware/boot path that supplies a valid DTB and exposes a usable VirtIO-GPU device. Without that metadata, the kernel fails closed and retains serial output.
+
+The completed verification set is `scripts/test_display.sh`, `scripts/test_display_aarch64.sh`, `scripts/test_display_riscv64.sh`, `scripts/test_display_unit.sh`, `scripts/test_boot_framebuffer_unit.sh`, `scripts/test_display_gpu.sh`, and the full `scripts/test.sh` regression runner. PCI ECAM transport, UEFI GOP, arbitrary-address framebuffer mapping, native non-x86 display interrupt/DMA integration, and userspace display capabilities remain future milestones.
 
 ---
 
