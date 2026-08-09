@@ -21,6 +21,8 @@
 #include "kernel/ext4.hpp"
 #include "kernel/process.hpp"
 #include "kernel/security.hpp"
+#include "kernel/input.hpp"
+#include "arch/input.hpp"
 
 // Static Heap Allocation Buffer (1 MB) to guarantee physical memory availability across architectures
 static uint8_t kernel_heap_buffer[1024 * 1024] __attribute__((aligned(8)));
@@ -186,6 +188,13 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
 
     // Initialize Hardware Interrupt System
     hal::interrupts_init();
+    input::Manager::init();
+    hal::input_init();
+    if (input::Manager::self_test()) {
+        kernel::kprintf("[TEST][PASS] Input ABI and boot keyboard decoder\n");
+    } else {
+        kernel::kprintf("[TEST][FAIL] Input ABI and boot keyboard decoder\n");
+    }
 
     // Initialize Preemptive Thread Scheduler
     scheduler::Scheduler::init();
@@ -231,6 +240,7 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
 #endif
 
     while (1) {
+        hal::input_poll();
         // The x86 PIT drives timer_tick() while the idle thread sleeps.
         // Other architectures retain their existing bring-up idle behavior.
 #if defined(__x86_64__)

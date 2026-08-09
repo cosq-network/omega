@@ -44,6 +44,7 @@ set(KERNEL_SOURCES
     kernel/sys/process.cpp
     kernel/sys/security.cpp
     kernel/sys/syscall.cpp
+    kernel/sys/input.cpp
     kernel/sys/vfs.cpp
     kernel/sys/ext4.cpp
     kernel/sys/initrd.cpp
@@ -69,6 +70,7 @@ if(ARCH STREQUAL "x86_64")
         kernel/arch/x86_64/boot.s
         kernel/arch/x86_64/serial.cpp
         kernel/arch/x86_64/idt.cpp
+        kernel/arch/x86_64/input.cpp
         kernel/arch/x86_64/timer.cpp
         kernel/arch/x86_64/timer.s
         kernel/arch/x86_64/pci.cpp
@@ -85,6 +87,7 @@ elseif(ARCH STREQUAL "aarch64")
         kernel/arch/aarch64/vectors.s
         kernel/arch/aarch64/uart.cpp
         kernel/arch/aarch64/gic.cpp
+        kernel/arch/aarch64/input.cpp
         kernel/arch/aarch64/pci.cpp
         kernel/arch/aarch64/display.cpp
     )
@@ -95,6 +98,7 @@ elseif(ARCH STREQUAL "riscv64")
         kernel/arch/riscv64/trap.s
         kernel/arch/riscv64/uart.cpp
         kernel/arch/riscv64/plic.cpp
+        kernel/arch/riscv64/input.cpp
         kernel/arch/riscv64/pci.cpp
         kernel/arch/riscv64/display.cpp
     )

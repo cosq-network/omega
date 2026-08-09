@@ -2,7 +2,7 @@
 
 ## Overview
 
-**Omega** is a lightweight, high-performance, freestanding C++ Unix-like microkernel core designed to cross-compile using Clang and LLVM (`ld.lld`) for **x86_64** (x64), **AArch64** (ARM64), and **RISC-V 64 (`rv64gc`)** target architectures.
+**Omega** is a lightweight, high-performance kernel core with an explicit Omega ABI boundary, designed to cross-compile using Clang and LLVM (`ld.lld`) for **x86_64** (x64), **AArch64** (ARM64), and **RISC-V 64 (`rv64gc`)** target architectures.
 
 ---
 
@@ -23,13 +23,14 @@
   - **x86_64 (x64)**: 64-bit Long Mode entry, PAE paging, PML4 4-level page tables (2MB Huge Pages identity mapping), GDT loading, Xen PVH ELF note (`.xen_note`) for direct QEMU booting, and **Standard VGA** output (VGA text mode + Bochs VBE linear framebuffer).
   - **AArch64 (ARM64)**: Dynamic Exception Level transition (`EL2 -> EL1`), 2048-byte aligned `VBAR_EL1` vector table, and `SP_EL1` stack setup.
   - **RISC-V 64 (`rv64gc`)**: Supervisor Mode (S-mode) boot entry, `Sv39` 3-level page tables, `stvec` trap vector, OpenSBI console `ecall` interface, `satp` register mapping, and validated OpenSBI-to-`kernel_main()` handoff.
-- **Omega C++ Kernel Runtime**: Independent of host C/C++ standard libraries (`-ffreestanding -fno-exceptions -fno-rtti`). Implements Omega's memory primitives (`memcpy`, `memset`, `memmove`, `memcmp`) and vararg printing (`kprintf`).
+- **Omega Kernel Runtime**: Independent of host C/C++ standard libraries while preserving the documented Omega ABI. Implements Omega's memory primitives (`memcpy`, `memset`, `memmove`, `memcmp`) and vararg printing (`kprintf`).
 - **Physical Memory Manager (PMM)**: 4KiB Bitmap Frame Allocator tracking physical page frames (`alloc_frame` / `free_frame`).
 - **Virtual Memory Manager (VMM)**: Architectural bring-up page-table support through `CR3` on x86_64, `TTBR0_EL1` on AArch64, and `satp` on RISC-V 64; x86_64 also has per-process roots, dedicated user PML4 slots, and isolated anonymous mappings.
 - **Dynamic Kernel Heap Allocator**: Free-list block header allocator providing standard C ABI bindings (`kmalloc` / `kfree`) with 8-byte alignment and block coalescing.
 - **Hardware Interrupt Architecture**: 256-entry Interrupt Descriptor Table (IDT) for x86_64, System Vector Base (`VBAR_EL1`) for AArch64, and Supervisor Trap Vector (`stvec`) / PLIC for RISC-V 64.
 - **Preemptive Multi-threading Scheduler**: Round-robin TCB engine with x86_64 PIT preemption, real interrupt-frame context switching, cooperative yield integration, and guarded cross-architecture fallback behavior.
 - **Linux-Compatible System Call ABI**: Architecture-specific Linux syscall numbering for x86_64, AArch64, and RISC-V 64, six-argument dispatch, Linux-style negative errno returns, and memory/process/credential syscall foundations. Native trap entry is not enabled yet. See [`docs/ABI.md`](docs/ABI.md).
+- **Keyboard and HID Input Foundation**: Versioned 64-byte input events, bounded kernel queue, raw keyboard transitions, modifier flags, relative mouse motion, buttons, input syscalls, HID boot-report decoders, and x86_64 PS/2 polling with portable AArch64/RISC-V adapters.
 - **Virtual Filesystem (VFS) & Initrd RAM Disk**: POSIX-like node tree with Linux-style UID/GID ownership, mode bits, umask-aware security foundations, traversal checks, and read/write permission enforcement.
 - **Linux-Compatible Users, Groups & Permissions**: Real/effective/saved filesystem IDs, supplementary groups, root DAC behavior, `chmod`/`chown`, `setuid`/`setgid`, `setgroups`, `umask`, and shared permission semantics on all three ISAs.
 - **Process Address-Space Foundation**: x86_64 cloned page-table roots, dedicated user mappings, process-owned credentials/descriptors, isolated anonymous `mmap`/`munmap`, and QEMU mapping-isolation verification; COW `fork`, mapped `brk`, isolated `execve`, active scheduler address-space switching, and native AArch64/RISC-V process page tables remain planned.
@@ -151,6 +152,7 @@ omega/
 │   ├── test_display.sh            # VGA / System Display Module test matrix
 │   ├── test_display_aarch64.sh    # AArch64 display HAL/fallback smoke test
 │   ├── test_storage_unit.sh       # Host storage API/partition unit tests
+│   ├── test_input_unit.sh         # Input ABI and decoder unit tests
 │   ├── test_storage.sh            # Storage unit + all-ISA QEMU integration tests
 │   ├── test_process.sh            # x86_64 process mapping isolation test
 │   ├── test_security.sh           # Linux credentials and VFS permission tests

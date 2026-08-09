@@ -1,4 +1,15 @@
-# Omega Pointing Devices Integration Plan
+# Omega Keyboard, HID, and Pointing Devices Integration Plan
+
+## Implementation status
+
+The first input slice is now implemented. `kernel/include/kernel/input.hpp`
+defines the versioned 64-byte event ABI and bounded queue; boot keyboard and
+mouse HID report decoders are portable across all three target architectures;
+x86_64 has a polling PS/2 keyboard/mouse backend; and AArch64/RISC-V have
+portable synthetic/HID-ready adapters. `SYS_INPUT_READ`, `SYS_INPUT_POLL`, and
+`SYS_INPUT_SUBSCRIBE` are reserved in the common Omega syscall extension range.
+USB/xHCI transport, native non-x86 interrupt delivery, hotplug, and userspace
+`inputd` remain subsequent milestones.
 
 ## 1. Purpose and scope
 
@@ -19,9 +30,8 @@ transport discovers and moves reports; HID and device-specific protocol code
 decodes them; the input service applies calibration, coordinate policy,
 gestures, permissions, and desktop/mobile behavior.
 
-This is a plan for future implementation. The current Omega tree has early
-serial/display, memory, interrupt, storage, USB-planning, emulator, and IPC
-foundations, but does not yet provide a complete input subsystem.
+The remaining sections describe the staged expansion from this foundation to
+complete USB, touch, hotplug, and userspace input support.
 
 ## 2. Goals and non-goals
 
@@ -106,8 +116,8 @@ focus routing, permissions, and compositor integration.
 
 ## 5. Generic pointing-input model
 
-Create a future `kernel/include/kernel/input/` namespace with fixed-width,
-freestanding types. The initial internal API should be convertible to a
+The implemented `kernel/include/kernel/input.hpp` API uses fixed-width Omega
+ABI types. Future device-specific extensions should remain convertible to a
 versioned C-compatible IPC ABI.
 
 ### 5.1 Device descriptor

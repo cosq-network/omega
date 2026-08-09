@@ -75,6 +75,11 @@ enum SyscallNumber {
 #endif
     SYS_YIELD      = SYS_SCHED_YIELD,
     SYS_CLONE      = SYS_FORK,
+    // Stable Omega input extension range, intentionally outside Linux's
+    // architecture-specific syscall number spaces.
+    SYS_INPUT_READ       = 0x4000,
+    SYS_INPUT_POLL       = 0x4001,
+    SYS_INPUT_SUBSCRIBE  = 0x4002,
     // Pre-Phase-7 compatibility aliases. New userspace must use the Linux
     // numbers above; these are retained only for old kernel test binaries.
     OMEGA_SYS_YIELD = 1,

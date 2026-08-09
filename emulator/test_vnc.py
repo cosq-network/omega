@@ -31,7 +31,9 @@ class FakeSocket:
 class VNCProtocolTests(unittest.TestCase):
     def test_rfb_security_handshake_and_server_init(self):
         pixel_format = b"\x00" * 16
-        incoming = b"RFB 003.008\n" + b"RFB 003.008\n" + b"\x01\x01" + struct.pack(">I", 0)
+        # The server sends one protocol version. After the client responds,
+        # QEMU sends the security-type count immediately.
+        incoming = b"RFB 003.008\n" + b"\x01\x01" + struct.pack(">I", 0)
         incoming += struct.pack(">HH", 1, 1) + pixel_format + struct.pack(">I", 0)
         fake = FakeSocket(incoming)
         with patch("emulator.ovd_vnc.socket.create_connection", return_value=fake):

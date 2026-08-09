@@ -89,6 +89,8 @@ run_test "x86_64" \
     "[TEST][PASS] Storage core memory block path" \
     "[TEST][PASS] Storage write and flush policy" \
     "Kernel Heap Allocator initialized" \
+    "x86_64 PS/2 keyboard and mouse input initialized" \
+    "[TEST][PASS] Input ABI and boot keyboard decoder" \
     "Interrupt Descriptor Table (IDT) Initialized" \
     "Preemptive Multi-threading Scheduler Initialized" \
     "POSIX System Call Surface Initialized" \
@@ -112,6 +114,8 @@ run_test "aarch64" \
     "[TEST][PASS] Storage core memory block path" \
     "[TEST][PASS] Storage write and flush policy" \
     "Kernel Heap Allocator initialized" \
+    "AArch64 portable input adapter initialized" \
+    "[TEST][PASS] Input ABI and boot keyboard decoder" \
     "Preemptive Multi-threading Scheduler Initialized" \
     "POSIX System Call Surface Initialized" \
     "Virtual Filesystem (VFS) Initialized" \
@@ -132,6 +136,8 @@ run_test "riscv64" \
     "Display console write path" \
     "[TEST][PASS] Storage core memory block path" \
     "[TEST][PASS] Storage write and flush policy" \
+    "RISC-V portable input adapter initialized" \
+    "[TEST][PASS] Input ABI and boot keyboard decoder" \
     "System online. Entering idle loop"
 
 # 5. VGA Display Module dedicated test matrix (Bochs VBE + VgaText fallback)
@@ -146,6 +152,7 @@ bash "${PROJECT_ROOT}/scripts/test_display_aarch64.sh"
 echo -e "\n[*] Running storage unit and integration test suite..."
 bash "${PROJECT_ROOT}/scripts/test_storage.sh"
 bash "${PROJECT_ROOT}/scripts/test_ext4_unit.sh"
+bash "${PROJECT_ROOT}/scripts/test_input_unit.sh"
 
 echo -e "\n[*] Running OVD storage transport and lifecycle test suite..."
 python3 -m unittest emulator.test_ovd_unit emulator.test_profile_catalog emulator.test_profile_ext4_integration

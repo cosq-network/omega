@@ -71,7 +71,9 @@ class RFBClient:
             if not version.startswith(b"RFB "):
                 raise VNCError("Not an RFB/VNC server")
             self._write(b"RFB 003.008\n")
-            self._read(12)
+            # RFB sends the server protocol version once. After the client
+            # responds, the next bytes are the security-type count; waiting
+            # for another version here deadlocks against QEMU.
             security_count = self._read(1)[0]
             if security_count == 0:
                 reason_length = struct.unpack(">I", self._read(4))[0]
@@ -210,6 +212,7 @@ class VNCViewer(tk.Toplevel):
         super().__init__(parent)
         self.title(f"Omega VNC — {host}:{port}")
         self.canvas = tk.Canvas(self, background="black", highlightthickness=0)
+        self.canvas.configure(takefocus=True)
         self.canvas.pack(fill="both", expand=True)
         self.client = RFBClient(host, port, self._frame, self._server_clipboard)
         self._image = None
@@ -218,8 +221,8 @@ class VNCViewer(tk.Toplevel):
         self.canvas.bind("<Motion>", self._motion)
         self.canvas.bind("<ButtonPress>", self._button)
         self.canvas.bind("<ButtonRelease>", self._button)
-        self.bind("<KeyPress>", lambda event: self._key(event, True))
-        self.bind("<KeyRelease>", lambda event: self._key(event, False))
+        self.canvas.bind("<KeyPress>", lambda event: self._key(event, True))
+        self.canvas.bind("<KeyRelease>", lambda event: self._key(event, False))
         self.bind("<Control-v>", self._paste)
         self.bind("<Command-v>", self._paste)
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -242,6 +245,7 @@ class VNCViewer(tk.Toplevel):
         connected, error = result
         if connected:
             self.focus_force()
+            self.canvas.focus_set()
         elif attempt < 5:
             self.after(300, lambda: self._connect(attempt + 1))
         else:
@@ -299,6 +303,7 @@ class VNCViewer(tk.Toplevel):
         if not self._closed: self.client.mouse(event.x, event.y, self._buttons)
     def _button(self, event):
         if self._closed: return
+        self.canvas.focus_set()
         button = event.num
         if button <= 3: self._buttons = (self._buttons | (1 << (button - 1))) if event.type == tk.EventType.ButtonPress else (self._buttons & ~(1 << (button - 1)))
         elif button in {4, 5} and event.type == tk.EventType.ButtonPress:

@@ -50,6 +50,24 @@ System calls return non-negative results on success and `-errno` on failure.
 | `SYS_WAIT4` | `61` | `260` | `pid_t wait4(pid_t, int *, int, void *)` |
 | `SYS_OPENAT` | `257` | `56` | `int openat(int dirfd, const char *path, int flags, mode_t mode)` |
 
+Omega input extensions use the reserved, architecture-independent range
+`0x4000`-`0x40ff` so the event ABI has the same numbers on x86_64, AArch64,
+and RISC-V 64:
+
+| Symbolic Name | Number | Prototype |
+| :--- | :---: | :--- |
+| `SYS_INPUT_READ` | `0x4000` | `ssize_t input_read(struct omega_input_event *events, size_t capacity)` |
+| `SYS_INPUT_POLL` | `0x4001` | `ssize_t input_poll(void)` |
+| `SYS_INPUT_SUBSCRIBE` | `0x4002` | `int input_subscribe(uint64_t type_mask)` |
+
+`omega_input_event` is a packed, little-endian, 64-byte record. Version 1
+contains version and size fields, device and sequence identifiers, a
+timestamp, an event type/code pair, flags, three signed 32-bit values, and
+reserved space. Event types are `KEY`, `REL`, `BUTTON`, `DEVICE`, and `SYN`.
+Keyboard events expose raw transitions and modifier state; layout and Unicode
+translation belong in userspace. Reads are bounded to the kernel queue
+capacity and return the number of records consumed.
+
 Credential calls use the native Linux per-ISA numbers for `getuid`, `geteuid`,
 `getgid`, `getegid`, `setuid`, `setgid`, `setresuid`, `setresgid`,
 `getgroups`, `setgroups`, and `umask`. File ownership uses `chmod`,

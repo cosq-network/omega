@@ -1,7 +1,7 @@
 # Omega Kernel Implementation Roadmap & Milestone Matrix
 
 ## Overview
-This document outlines the multi-phase implementation roadmap for **Omega**—a cross-platform microkernel core written in C++20. Omega cross-compiles natively on macOS (Apple Silicon M1/M2/M3) using Clang and LLVM (`ld.lld`) for **x86_64**, **AArch64**, and **RISC-V 64 (`rv64gc`)** architectures.
+This document outlines the multi-phase implementation roadmap for **Omega**, a cross-platform kernel core targeting **x86_64**, **AArch64**, and **RISC-V 64 (`rv64gc`)** architectures.
 
 Phases **1–6** cover the research-kernel foundation, with userspace items
 remaining partial where their native execution path is not installed. Phases
@@ -97,10 +97,11 @@ Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsys
 | **Phase 7.1: Storage Core & VirtIO-Block** | `IN PROGRESS` | Common storage API, device graph, DMA foundation, and guarded VirtIO-Block reference driver | Request validation, lifecycle binding, MMIO/legacy PCI VirtIO, partition metadata, controlled writes, protocol-driver expansion | Host unit tests, x86_64 QEMU runtime completion, profile-backed ext4 tests, and cross-architecture builds |
 | **Phase 7.2: System Display Module (Standard VGA)** | `COMPLETED` | x86_64 VGA text mode, Bochs VBE linear FB, dual serial+display console | `hal::Display`, Bochs DISPI 1024×768×32, 8×16 font, Multiboot2 FB tag, `kprintf` mirroring | `scripts/test_display.sh`, CI, OVD `--gpu` |
 | **Phase 7.2b: AArch64 & RISC-V Display** | `IN PROGRESS` | SimpleFb (DT), shared FDT parser, portable framebuffer console, and guarded VirtIO-GPU MMIO foundation | FDT walker, DT pointer handoff, `SimpleFb` HALs, identity-map VMM bring-up, VirtIO-GPU protocol/queue scaffold, serial fallback | `scripts/test_display_aarch64.sh`, QEMU AArch64/RISC-V smoke tests |
-| **Phase 7.3: SMP Multi-Core** | `PLANNED` | Symmetric multiprocessing across all cores | APIC ICR (x86), PSCI (AArch64), OpenSBI IPI (RISC-V); per-CPU run queues | Multi-core boot log, parallel thread execution |
-| **Phase 7.4: Timer-Driven Preemption** | `PARTIAL` | x86_64 PIT IRQ0, interrupt-frame scheduler switching, and guarded two-thread self-test; AArch64/RISC-V timers remain planned | QEMU x86_64 preemption/context-switch test; architecture timer ports pending |
-| **Phase 7.5: Per-Process Address Spaces** | `PARTIAL` | x86_64 cloned roots, dedicated user mapping slots, isolated anonymous `mmap`/`munmap`, process-owned credentials/descriptors, Linux syscall numbering, and bounded user-range checks; mapped `brk`, COW, native ARM/RISC-V roots, and active scheduler address-space switching remain | QEMU two-process mapping isolation plus all-ISA builds and permission checks; COW and native non-x86 page tables pending |
-| **Phase 7.6: IPC Foundation** | `PLANNED` | Inter-process communication for microkernel services | Message passing, capability tokens, shared-memory grants | Driver server ↔ client round-trip |
+| **Phase 7.3: Keyboard/HID Input** | `IN PROGRESS` | Versioned cross-ISA input ABI, bounded event queue, HID boot-report decoders, and x86_64 PS/2 polling backend | Raw key transitions, modifier flags, relative motion, buttons, input syscalls, synthetic adapters for AArch64/RISC-V | `scripts/test_input_unit.sh`, all-ISA builds, QEMU boot markers; USB/xHCI and native IRQ delivery remain pending |
+| **Phase 7.4: SMP Multi-Core** | `PLANNED` | Symmetric multiprocessing across all cores | APIC ICR (x86), PSCI (AArch64), OpenSBI IPI (RISC-V); per-CPU run queues | Multi-core boot log, parallel thread execution |
+| **Phase 7.5: Timer-Driven Preemption** | `PARTIAL` | x86_64 PIT IRQ0, interrupt-frame scheduler switching, and guarded two-thread self-test; AArch64/RISC-V timers remain planned | QEMU x86_64 preemption/context-switch test; architecture timer ports pending |
+| **Phase 7.6: Per-Process Address Spaces** | `PARTIAL` | x86_64 cloned roots, dedicated user mapping slots, isolated anonymous `mmap`/`munmap`, process-owned credentials/descriptors, Linux syscall numbering, and bounded user-range checks; mapped `brk`, COW, native ARM/RISC-V roots, and active scheduler address-space switching remain | QEMU two-process mapping isolation plus all-ISA builds and permission checks; COW and native non-x86 page tables pending |
+| **Phase 7.7: IPC Foundation** | `PLANNED` | Inter-process communication for microkernel services | Message passing, capability tokens, shared-memory grants | Driver server ↔ client round-trip |
 
 **Exit criteria:** Omega boots in QEMU with block storage, **graphical console on x86_64 (done)**, SMP, preemptive scheduling, process isolation, and a userspace driver server communicating over IPC.
 
@@ -368,7 +369,7 @@ legacy boot-image mode.
 | **R2 Generated reports** | `PLANNED` | Deterministic CSV, JSON, Markdown, and lock artifacts |
 | **R3 OVD integration** | `PARTIAL` | Profile list/show/validate/render/artifacts commands, native create-from-profile path, profile-aware Python/Tkinter management, and verified image checks are wired; external adapters remain |
 | **R4 Android adapter** | `PLANNED` | AVD discovery, launch, GPU, ADB, snapshots, and cleanup |
-| **R5 VMApple adapter** | `PLANNED` | Apple-Silicon/macOS prerequisite and conditional launch workflow |
+| **R5 Host virtualization adapter** | `PLANNED` | Conditional launch workflow for supported development hosts |
 | **R6 Physical mappings** | `PLANNED` | Hardware records linked to virtual approximations |
 | **R7 Maintenance automation** | `PLANNED` | QEMU compatibility scans, ownership, deprecation, and release reports |
 
@@ -597,7 +598,7 @@ Concrete sequence mapped to the existing codebase:
 - **Microkernel IPC overhead:** Must be measured and optimized early to avoid performance regressions vs monolithic kernels.
 - **Phone certification:** Regulatory and carrier approval adds 6–12 months beyond software readiness.
 
-Omega's multi-arch HAL, C++20 kernel runtime, formal syscall ABI, and OVD tooling provide a strong kernel-side foundation. The critical path to production runs through **real hardware drivers, userland maturity, and ecosystem tooling**—not additional QEMU subsystems alone.
+Omega's multi-arch HAL, kernel runtime, formal syscall ABI, and OVD tooling provide a strong kernel-side foundation. The critical path to production runs through **real hardware drivers, userland maturity, and ecosystem tooling**—not additional QEMU subsystems alone.
 
 ---
 

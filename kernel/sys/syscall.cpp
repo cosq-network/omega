@@ -5,6 +5,7 @@
 #include "kernel/process.hpp"
 #include "kernel/security.hpp"
 #include "kernel/memory.hpp"
+#include "kernel/input.hpp"
 
 namespace syscall {
 
@@ -64,6 +65,16 @@ int64_t SyscallDispatcher::dispatch6(uint64_t sys_num, uint64_t arg1, uint64_t a
         case SYS_SCHED_YIELD:
             scheduler::Scheduler::yield();
             return 0;
+        case SYS_INPUT_READ: {
+            const size_t capacity = static_cast<size_t>(arg2);
+            if (capacity == 0 || capacity > input::EventQueue::CAPACITY ||
+                !valid_user_range(arg1, capacity * sizeof(input::InputEvent))) return -ERR_EFAULT;
+            return static_cast<int64_t>(input::Manager::read(reinterpret_cast<input::InputEvent*>(arg1), capacity));
+        }
+        case SYS_INPUT_POLL:
+            return static_cast<int64_t>(input::Manager::available());
+        case SYS_INPUT_SUBSCRIBE:
+            return input::Manager::subscribe(arg1);
         case SYS_WRITE: {
             const int fd = static_cast<int>(arg1);
             const char* buf = reinterpret_cast<const char*>(arg2);
