@@ -28,6 +28,22 @@ qemu-system-x86_64 \
 
 **Expected serial markers:** `[+] Display: BochsVbe 1024x768x32`, `[TEST][PASS] Bochs VBE linear framebuffer pixel`
 
+### x86_64 userspace bootstrap
+
+The first runnable userspace artifact is a freestanding static `/init`. The
+focused test builds it, packs it into the Omega initrd format, loads the initrd
+at `0x600000`, maps its ELF `PT_LOAD` segment into PID 1, and verifies Ring 3
+entry plus `SYS_write`/`SYS_exit` through the native `syscall` path:
+
+```bash
+./scripts/test_userland.sh
+```
+
+This is an x86_64 reference-platform path. The current init has a minimal
+assembly startup/syscall stub rather than a general libc. COW `fork`,
+`wait4`, signals, dynamic linking, and native AArch64/RISC-V userspace remain
+future milestones.
+
 **Automated tests:**
 
 ```bash

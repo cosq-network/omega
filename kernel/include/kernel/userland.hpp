@@ -8,6 +8,7 @@ namespace userland {
 class UserlandManager {
 public:
     static void init();
+    static void init_x86_syscall_stack();
     static void enter_userland(uintptr_t user_entry, uintptr_t user_stack);
 };
 

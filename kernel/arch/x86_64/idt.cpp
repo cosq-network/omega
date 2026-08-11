@@ -2,6 +2,9 @@
 #include "kernel/kprint.hpp"
 
 extern "C" void x86_timer_interrupt_stub();
+extern "C" void x86_page_fault_stub();
+extern "C" uint64_t gdt64[];
+extern "C" uintptr_t x86_user_kernel_stack_top();
 
 namespace hal {
 
@@ -22,6 +25,30 @@ struct IdtPointer {
 
 static IdtEntry idt[256];
 static IdtPointer idtr;
+
+struct X86Tss {
+    uint32_t reserved0;
+    uint64_t rsp0, rsp1, rsp2;
+    uint64_t reserved1;
+    uint64_t ist[7];
+    uint64_t reserved2;
+    uint16_t reserved3;
+    uint16_t iomap_base;
+} __attribute__((packed));
+
+static X86Tss tss __attribute__((aligned(16)));
+
+static void install_tss() {
+    tss = {};
+    tss.rsp0 = x86_user_kernel_stack_top();
+    tss.iomap_base = sizeof(X86Tss);
+    const uintptr_t base = reinterpret_cast<uintptr_t>(&tss);
+    const uint64_t limit = sizeof(X86Tss) - 1;
+    gdt64[5] = (limit & 0xffff) | ((base & 0xffffff) << 16) |
+               (0x89ull << 40) | ((base >> 24 & 0xff) << 56);
+    gdt64[6] = (base >> 32) & 0xffffffffull;
+    asm volatile("ltr %0" : : "r"(static_cast<uint16_t>(0x28)) : "memory");
+}
 
 static void set_gate(uint8_t vector, uintptr_t handler) {
     idt[vector].isr_low = static_cast<uint16_t>(handler & 0xffff);
@@ -45,6 +72,8 @@ void interrupts_init() {
     }
 
     set_gate(32, reinterpret_cast<uintptr_t>(&x86_timer_interrupt_stub));
+    set_gate(14, reinterpret_cast<uintptr_t>(&x86_page_fault_stub));
+    install_tss();
 
     // Load IDTR register
     asm volatile("lidt %0" : : "m"(idtr));

@@ -25,6 +25,8 @@ struct Process {
     vfs::VfsNode* fd_table[16];
     Mapping mappings[32];
     uint32_t mapping_count;
+    uintptr_t user_entry;
+    uintptr_t user_stack;
 };
 
 class Manager {
@@ -38,6 +40,7 @@ public:
     static int64_t brk(uintptr_t address);
     static int64_t fork();
     static int64_t self_test();
+    static bool activate(Process* process);
 };
 
 } // namespace process

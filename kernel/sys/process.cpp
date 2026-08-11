@@ -81,6 +81,8 @@ Process* Manager::create() {
     process->credentials = security::Manager::current();
     for (auto& fd : process->fd_table) fd = nullptr;
     process->mapping_count = 0;
+    process->user_entry = 0;
+    process->user_stack = 0;
     if (!memory::VirtualMemoryManager::create_address_space(&process->address_space)) {
         kfree(process);
         return nullptr;
@@ -197,6 +199,13 @@ int64_t Manager::self_test() {
 #else
     return -ERR_ENOSYS;
 #endif
+}
+
+bool Manager::activate(Process* process) {
+    if (process == nullptr || !process->alive || !process->address_space.valid) return false;
+    current_process = process;
+    security::Manager::bind(&process->credentials);
+    return memory::VirtualMemoryManager::activate(&process->address_space);
 }
 
 } // namespace process

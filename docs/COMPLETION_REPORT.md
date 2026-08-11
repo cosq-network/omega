@@ -1,7 +1,7 @@
 # Omega Kernel: Phase Completion & Architecture Status Report
 
 ## Executive Summary
-This report summarizes the successful end-to-end design, implementation, and empirical QEMU verification of **Omega**—a freestanding, cross-platform microkernel core written in C++20. Omega cross-compiles natively on macOS (Apple Silicon M1/M2/M3) using Clang and LLVM (`ld.lld`) and targets both **x86_64** (x64) and **AArch64** (ARM64) architectures.
+This report summarizes the successful end-to-end design, implementation, and empirical QEMU verification of **Omega**—a freestanding, cross-platform microkernel core written in C++20. Omega cross-compiles natively on macOS (Apple Silicon M1/M2/M3) using Clang and LLVM (`ld.lld`) and targets **x86_64** (x64), **AArch64** (ARM64), and **RISC-V 64**. The x86_64 reference platform now includes a verified initrd-backed Ring 3 userspace bootstrap.
 
 ---
 
@@ -18,11 +18,11 @@ This report summarizes the successful end-to-end design, implementation, and emp
 | **Virtual Memory (VMM)** | Page Table Control (`CR3`) | Translation Table (`TTBR0_EL1`) | `map_page` / `unmap_page` |
 | **Kernel Heap Allocator** | Free-List Coalescing `kmalloc` | Free-List Coalescing `kmalloc` | Dynamic Memory Allocation |
 | **Thread Scheduler** | Circular Round-Robin Scheduler | Circular Round-Robin Scheduler | Cooperative Thread Yields |
-| **System Call ABI** | `sys_call` Dispatcher (SYS_WRITE) | `sys_call` Dispatcher (SYS_WRITE) | Userland Syscall Simulation |
+| **System Call ABI** | Linux-numbered dispatcher plus native `syscall`/`sysretq` Ring 3 path | Dispatcher and ABI definitions | Dispatcher-only bring-up |
 | **Virtual Filesystem** | VFS Node Tree (`/` Mounted) | VFS Node Tree (`/` Mounted) | `vfs::open("/")` |
 | **RAM Disk (Initrd)** | Memory File Abstraction Driver | Memory File Abstraction Driver | `initrd::init(0x600000)` |
-| **Userland Privilege** | Ring 3 / EL0 Manager | Ring 3 / EL0 Manager | `enter_userland()` |
-| **ELF Executable Loader** | 64-bit ELF Header Parser | 64-bit ELF Header Parser | `ElfLoader::load()` |
+| **Userland Privilege** | Real Ring 3 `iretq` entry, TSS kernel stack, page-fault gate | EL0 manager placeholder | `scripts/test_userland.sh` |
+| **ELF Executable Loader** | Validated static `PT_LOAD` mapping into PID 1 | 64-bit ELF header parser | Initrd `/init` QEMU test |
 | **POSIX Syscall Surface** | `sys_open`, `sys_fork`, `sys_execve` | `sys_open`, `sys_fork`, `sys_execve` | File Descriptor Table |
 | **PCI Bus Scanner** | Ports `0xCF8`/`0xCFC` Config Scan | AArch64 Device Scanner | Vendor/Device ID Read |
 | **VirtIO Network Stack** | VirtIO-Net, IPv4 L3, UDP/TCP L4 | VirtIO-Net, IPv4 L3, UDP/TCP L4 | Packet Handler Interface |
@@ -106,7 +106,8 @@ omega/
 [+] POSIX System Call Surface Initialized (SYS_OPEN, SYS_READ, SYS_CLOSE, SYS_FORK, SYS_EXECVE).
 [+] Virtual Filesystem (VFS) Initialized.
     Root Node '/' Mounted.
-[+] RAM Disk (Initrd) Initialized at location: 0x600000
+    [+] RAM Disk (Initrd) Initialized at location: 0x600000
+    [+] Initrd userspace files registered.
     Total Ramdisk Files: 0
 [+] Scanning PCI Bus Configuration Space...
     Found PCI Device [0:0:0] Vendor: 0x8086, Device: 0x1237
@@ -115,11 +116,12 @@ omega/
     Found PCI Device [0:3:0] Vendor: 0x8086, Device: 0x100E
 [+] VirtIO-Net Driver & TCP/IP Network Stack Initialized.
     Ethernet L2, IPv4 L3, UDP/TCP L4 Stack Active.
-[+] Userland Mode Manager (Ring 3 / EL0) Initialized.
-[+] Valid 64-bit ELF Binary Detected.
-    ELF Entry Point: 0x401000, Program Headers: 1
-    --> PT_LOAD Segment [0]: Virt 0x401000, Memory Size: 128 bytes
-[+] ELF Executable Binary Successfully Parsed & Loaded!
+    [+] Userland Mode Manager (Ring 3 / EL0) Initialized.
+    [+] ELF PT_LOAD segments mapped for /init.
+    [TEST][PASS] PID 1 userspace address space activated
+    [+] x86_64 native syscall entry installed (STAR/LSTAR/GS stack).
+    [+] Entering x86_64 Ring 3 init (Entry: 0x400000000000, Stack: 0x7fffffeffff0)
+    Omega userspace init: Ring 3 syscall path is alive
 [+] System online. Entering idle loop...
 ```
 

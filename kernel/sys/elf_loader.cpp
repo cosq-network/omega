@@ -1,6 +1,8 @@
 #include "kernel/elf_loader.hpp"
 #include "kernel/kprint.hpp"
 #include "kernel/memory.hpp"
+#include "kernel/process.hpp"
+#include "kernel/heap.hpp"
 
 namespace elf {
 
@@ -13,6 +15,8 @@ constexpr uint16_t ET_DYN = 3;
 constexpr uint32_t PT_LOAD = 1;
 constexpr uint32_t PT_DYNAMIC = 2;
 constexpr uint32_t PT_INTERP = 3;
+constexpr uint32_t PF_X = 1;
+constexpr uint32_t PF_W = 2;
 #if defined(__x86_64__)
 constexpr uint16_t EM_TARGET = 62;
 #elif defined(__aarch64__)
@@ -32,6 +36,12 @@ static bool supported_machine(uint16_t machine) {
     (void)machine;
     return false;
 #endif
+}
+
+static uintptr_t align_down(uintptr_t value) { return value & ~(memory::PAGE_SIZE - 1); }
+static uintptr_t align_up(uintptr_t value) {
+    if (value > ~static_cast<uintptr_t>(0) - (memory::PAGE_SIZE - 1)) return 0;
+    return (value + memory::PAGE_SIZE - 1) & ~(memory::PAGE_SIZE - 1);
 }
 }
 
@@ -103,6 +113,56 @@ uintptr_t ElfLoader::load(const uint8_t* elf_data, size_t image_size) {
     }
 
     return header->e_entry;
+}
+
+bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
+                           size_t image_size, uintptr_t* entry, uintptr_t* stack) {
+    if (process == nullptr || entry == nullptr || stack == nullptr ||
+        !validate(elf_data, image_size)) return false;
+    const auto* header = reinterpret_cast<const Elf64Header*>(elf_data);
+    for (uint16_t i = 0; i < header->e_phnum; ++i) {
+        const auto* ph = reinterpret_cast<const Elf64ProgramHeader*>(
+            elf_data + header->e_phoff + static_cast<size_t>(i) * header->e_phentsize);
+        if (ph->p_type != PT_LOAD || ph->p_memsz == 0) continue;
+        if (ph->p_vaddr >= 0x0000800000000000ull || ph->p_vaddr + ph->p_memsz < ph->p_vaddr) return false;
+        const uintptr_t first = align_down(static_cast<uintptr_t>(ph->p_vaddr));
+        const uintptr_t last = align_up(static_cast<uintptr_t>(ph->p_vaddr + ph->p_memsz));
+        if (last == 0 || last <= first) return false;
+        uint32_t flags = memory::PAGE_PRESENT | memory::PAGE_USER;
+        if (ph->p_flags & PF_W) flags |= memory::PAGE_WRITABLE;
+        if (ph->p_flags & PF_X) flags |= memory::PAGE_EXEC;
+        for (uintptr_t address = first; address < last; address += memory::PAGE_SIZE) {
+            const uintptr_t frame = memory::PhysicalMemoryManager::alloc_frame();
+            if (frame == 0 || !memory::VirtualMemoryManager::map_page(&process->address_space, address, frame, flags)) return false;
+            auto* destination = reinterpret_cast<uint8_t*>(frame);
+            for (size_t j = 0; j < memory::PAGE_SIZE; ++j) destination[j] = 0;
+            const uint64_t page_start = address;
+            const uint64_t page_end = address + memory::PAGE_SIZE;
+            const uint64_t file_start = ph->p_vaddr;
+            const uint64_t file_end = ph->p_vaddr + ph->p_filesz;
+            const uint64_t copy_start = page_start > file_start ? page_start : file_start;
+            const uint64_t copy_end = page_end < file_end ? page_end : file_end;
+            for (uint64_t cursor = copy_start; cursor < copy_end; ++cursor)
+                destination[cursor - page_start] = elf_data[ph->p_offset + cursor - ph->p_vaddr];
+            if (process->mapping_count >= 32) return false;
+            process->mappings[process->mapping_count++] = {address, memory::PAGE_SIZE};
+        }
+    }
+
+    constexpr uintptr_t stack_top = 0x00007ffffff00000ull;
+    constexpr uintptr_t stack_page = stack_top - memory::PAGE_SIZE;
+    const uintptr_t frame = memory::PhysicalMemoryManager::alloc_frame();
+    if (frame == 0 || !memory::VirtualMemoryManager::map_page(&process->address_space, stack_page, frame,
+                                                               memory::PAGE_PRESENT | memory::PAGE_USER | memory::PAGE_WRITABLE)) return false;
+    auto* stack_memory = reinterpret_cast<uint8_t*>(frame);
+    for (size_t i = 0; i < memory::PAGE_SIZE; ++i) stack_memory[i] = 0;
+    if (process->mapping_count >= 32) return false;
+    process->mappings[process->mapping_count++] = {stack_page, memory::PAGE_SIZE};
+    *entry = static_cast<uintptr_t>(header->e_entry);
+    *stack = stack_top - 16;
+    process->user_entry = *entry;
+    process->user_stack = *stack;
+    return true;
 }
 
 uintptr_t ElfLoader::load(const uint8_t* elf_data) {

@@ -236,11 +236,32 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
     // Initialize Userland Privilege System
     userland::UserlandManager::init();
 
-    // Parse and Load ELF Binary
-    uintptr_t elf_entry = elf::ElfLoader::load(mock_elf_binary, sizeof(mock_elf_binary));
-    if (elf_entry) {
-        kernel::kprintf("[+] ELF Executable Binary Successfully Parsed & Loaded!\n");
+    // Replace the bring-up mock with the first real Omega userspace process.
+    // The x86_64 reference path consumes /init from the RAM initrd, maps its
+    // PT_LOAD segments into PID 1's address space, and enters Ring 3.
+#if defined(__x86_64__)
+    auto* init_file = initrd::Initrd::find("/init");
+    auto* init_process = process::Manager::current();
+    uintptr_t user_entry = 0;
+    uintptr_t user_stack = 0;
+    if (init_file != nullptr && init_process != nullptr &&
+        elf::ElfLoader::load_into(init_process,
+                                  reinterpret_cast<const uint8_t*>(init_file->fs_data),
+                                  init_file->size, &user_entry, &user_stack) &&
+        process::Manager::activate(init_process)) {
+        kernel::kprintf("[+] ELF PT_LOAD segments mapped for /init.\n");
+        kernel::kprintf("[TEST][PASS] PID 1 userspace address space activated\n");
+        userland::UserlandManager::init_x86_syscall_stack();
+        userland::UserlandManager::enter_userland(user_entry, user_stack);
+    } else {
+        kernel::kprintf("[!] /init unavailable; staying in kernel idle loop.\n");
+        uintptr_t elf_entry = elf::ElfLoader::load(mock_elf_binary, sizeof(mock_elf_binary));
+        if (elf_entry) kernel::kprintf("[+] ELF Executable Binary Successfully Parsed & Loaded!\n");
     }
+#else
+    uintptr_t elf_entry = elf::ElfLoader::load(mock_elf_binary, sizeof(mock_elf_binary));
+    if (elf_entry) kernel::kprintf("[+] ELF Executable Binary Successfully Parsed & Loaded!\n");
+#endif
 
     kernel::kprintf("[+] System online. Entering idle loop...\n");
 

@@ -73,6 +73,7 @@ if(ARCH STREQUAL "x86_64")
         kernel/arch/x86_64/input.cpp
         kernel/arch/x86_64/timer.cpp
         kernel/arch/x86_64/timer.s
+        kernel/arch/x86_64/user_entry.s
         kernel/arch/x86_64/pci.cpp
         kernel/arch/x86_64/vga_regs.cpp
         kernel/arch/x86_64/vga_text.cpp

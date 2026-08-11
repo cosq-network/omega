@@ -23,6 +23,11 @@ The first compatibility target is **source and link compatibility for small
 Linux-style applications**, not arbitrary Linux binary compatibility. Existing
 Linux applications must be rebuilt against the Omega sysroot and Omega CRT.
 
+Current bootstrap status: x86_64 can execute a freestanding static `/init`
+from the Omega initrd using a minimal assembly startup and direct syscall stub.
+The general Omega CRT, libc headers/libraries, allocator wrappers, and C/C++
+SDK packaging described below remain implementation work.
+
 ## 2. Non-Goals for SDK v1
 
 The following are deliberately deferred:

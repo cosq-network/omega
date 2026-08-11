@@ -76,10 +76,15 @@ stack_top:
 /* Early GDT for 64-bit Long Mode Transition */
 .section .rodata
 .align 8
+.global gdt64
 gdt64:
     .quad 0 # Null Descriptor
     .quad 0x00af9a000000ffff # 64-bit Code Segment (Kernel)
     .quad 0x00cf92000000ffff # 64-bit Data Segment (Kernel)
+    .quad 0x00affa000000ffff # 64-bit Code Segment (User, DPL3)
+    .quad 0x00cff2000000ffff # 64-bit Data Segment (User, DPL3)
+    .quad 0                    # 64-bit TSS descriptor (filled by C++)
+    .quad 0
 gdt64_pointer:
     .word . - gdt64 - 1
     .quad gdt64

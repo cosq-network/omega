@@ -3,6 +3,8 @@
 
 #include "std/cstdint.hpp"
 
+namespace process { struct Process; }
+
 namespace elf {
 
 struct Elf64Header {
@@ -38,6 +40,8 @@ public:
     static bool validate(const uint8_t* elf_data);
     static bool validate(const uint8_t* elf_data, size_t image_size);
     static uintptr_t load(const uint8_t* elf_data, size_t image_size);
+    static bool load_into(process::Process* process, const uint8_t* elf_data,
+                          size_t image_size, uintptr_t* entry, uintptr_t* stack);
     // Unsized loading cannot be made memory-safe; retained as a compatibility
     // entry that fails closed.
     static uintptr_t load(const uint8_t* elf_data);

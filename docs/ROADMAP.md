@@ -43,11 +43,11 @@ networking, display, input, recovery, and a stable userspace ABI.
 | **Phase 3C: Dynamic Kernel Heap** | `COMPLETED` | Free-list block header allocator | `kmalloc` / `kfree` with block coalescing | Static Heap Buffer |
 | **Phase 3D: Interrupt Drivers** | `COMPLETED` | Hardware interrupt gate setup | 256-entry IDT (x86), VBAR (ARM), STVEC/PLIC (RISC-V) | Hardware Traps |
 | **Phase 4A: Preemptive Multi-threading**| `COMPLETED` | Round-robin thread scheduler | Thread Control Blocks (TCB), stack allocation | Cooperative Yields |
-| **Phase 4B: System Call ABI Dispatcher**| `PARTIAL` | Linux-numbered six-argument dispatcher and fail-closed syscall foundation (`docs/ABI.md`) | `SYS_YIELD`, `SYS_WRITE`, memory and credential calls | Unit/integration dispatcher coverage; native trap entry pending |
+| **Phase 4B: System Call ABI Dispatcher**| `PARTIAL` | Linux-numbered six-argument dispatcher; native x86_64 `syscall`/`sysretq` path is implemented while other ISAs remain dispatcher-only | `SYS_YIELD`, `SYS_WRITE`, memory and credential calls | `scripts/test_userland.sh`; native ARM/RISC-V trap entry pending |
 | **Phase 5A: Virtual Filesystem (VFS)** | `COMPLETED` | VFS node tree & root directory mount | POSIX node operations, `/` mount | `vfs::open("/")` |
 | **Phase 5B: RAM Disk Initrd** | `COMPLETED` | Initial RAM disk memory file driver | Memory file header reader | `initrd::init()` |
-| **Phase 5.1: Userland Privilege Mode**| `PARTIAL` | Fail-closed Ring 3 / EL0 / U-Mode entry contract; native privilege transition remains pending | Userland entry validation and architecture trap frames | `enter_userland()` |
-| **Phase 5.2: ELF 64-bit Binary Parser**| `PARTIAL` | Bounded executable header and program-header validation | `Elf64Header` & safe `PT_LOAD` checks | `ElfLoader::validate(data, size)` |
+| **Phase 5.1: Userland Privilege Mode**| `PARTIAL` | Real x86_64 Ring 3 entry, TSS kernel stack, and page-fault gate; native EL0/U-mode transitions remain pending | Userland entry validation and architecture trap frames | `scripts/test_userland.sh` |
+| **Phase 5.2: ELF 64-bit Binary Parser**| `PARTIAL` | Bounded executable validation plus x86_64 static `PT_LOAD` mapping | `Elf64Header`, safe segment checks, user stack | `scripts/test_userland.sh` |
 | **Phase 5.3: POSIX Syscall Expansion** | `PARTIAL` | Linux-numbered dispatcher, process-owned descriptor foundation, and safe failure paths | `sys_open`, `sys_read`, `sys_close`, memory and credential calls | `scripts/test_process.sh`, syscall unit coverage |
 | **Phase 5.4: PCI Bus Scanner** | `COMPLETED` | PCI bus configuration space reader | I/O Ports `0xCF8`/`0xCFC` scanning | Device Vendor Scan |
 | **Phase 5.5: VirtIO Network Stack** | `COMPLETED` | VirtIO-Net packet driver & TCP/IP stack | L2 Ethernet, L3 IPv4, L4 UDP/TCP headers | Frame RX Reader |
@@ -153,7 +153,7 @@ complete.
 | **7.D.2 Per-process address spaces** | `PARTIAL` | x86_64 isolated page tables, process-owned Linux-style credentials/descriptors, syscall numbering, anonymous mappings, and bounded user-range checks; mapped heap growth, COW, active switching, and native ARM/RISC-V roots remain | Two-process mapping and cross-ISA build/permission matrix; COW/fault tests pending |
 | **7.D.3 Capability-based IPC** | `PLANNED` | Typed messages, endpoint ownership, capability transfer, shared-memory grants, timeout/cancellation | Driver-server round-trip and abuse tests |
 | **7.D.4 Portable driver contracts** | `PLANNED` | Common interrupt, DMA, MMIO, block, net, display, and input interfaces | Synthetic drivers plus all-ISA contract tests |
-| **7.D.5 Userspace bootstrap** | `PLANNED` | Init process, process lifecycle, shell over serial, Omega SDK CRT/libc bootstrap, stable ABI versioning | End-to-end ELF/init/syscall test |
+| **7.D.5 Userspace bootstrap** | `PARTIAL` | x86_64 PID 1 init from initrd, PT_LOAD mapping, Ring 3 entry, native syscall return, and minimal assembly CRT/syscall stub; process lifecycle, shell, and full libc remain | `scripts/test_userland.sh`; process lifecycle and SDK expansion pending |
 | **7.D.6 Linux identity and permission model** | `PARTIAL` | UID/GID credentials, supplementary groups, umask, root DAC rules, mode bits, VFS traversal/read/write checks, process binding on the x86_64 foundation, and Linux syscall-number tables on all ISAs | `scripts/test_security.sh`, all-ISA builds/permission checks, ext4 ownership/mode parsing |
 
 **Architecture-track exit criteria:** each target boots on its reference QEMU
@@ -580,7 +580,7 @@ Concrete sequence mapped to the existing codebase:
 4. **Advance RISC-V P1 parity** — SBI HSM/timer/IPI services, SMP, PLIC hardening, AIA capability planning, Sv48/PMP preparation, and VirtIO-MMIO completion on QEMU `virt`.
 5. **Complete storage and display reference paths** — NVMe/AHCI/SDHCI/USB layers, ext4 writeback, AArch64/RISC-V VirtIO-GPU, UEFI GOP, and real framebuffer integration. *(Standard VGA and x86_64 transitional VirtIO-Block completion are validated.)*
 6. **Validate one reference board per ISA** — QEMU `q35`/OVMF, QEMU AArch64 `virt`, QEMU RISC-V `virt`, then Raspberry Pi 4/5 and one x86_64 laptop.
-7. **Build the userspace base** — Minimal init, serial shell, Omega SDK CRT/libc, process tools, filesystem utilities, passwd/group/permission tooling, and a versioned Linux-compatible syscall/IPC ABI in `docs/ABI.md`.
+7. **Extend the userspace base** — Process lifecycle (`exit`, `wait4`, COW `fork`), serial shell, Omega SDK CRT/libc, process tools, filesystem utilities, passwd/group/permission tooling, and a versioned Linux-compatible syscall/IPC ABI in `docs/ABI.md`. The first x86_64 init/ELF/Ring 3/syscall slice is now verified by `scripts/test_userland.sh`.
 8. **Move drivers behind IPC** — Storage, network, display, input, and USB as capability-scoped userspace servers with measured IPC overhead.
 9. **Keep OVD aligned with kernel maturity** — Add architecture capability gates, live boot matrices, device hotplug scenarios, artifact manifests, and profile readiness checks for each QEMU reference target.
 10. **Defer phone work** — Until x86_64 and AArch64 laptop/tablet reference systems demonstrate reliable boot, storage, networking, display, input, power, recovery, and userspace quality.

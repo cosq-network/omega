@@ -7,10 +7,10 @@ This specification defines the formal Application Binary Interface (ABI) of the 
 
 ## 1. System Call Architecture & Calling Conventions
 
-The register and instruction table below is the planned userspace syscall
-entry contract. The current kernel exposes a dispatcher for tests and bring-up;
-native Ring 3/EL0/U-Mode trap entry is not enabled yet and userland entry fails
-closed until architecture-specific trap frames and selectors are installed.
+The register and instruction table below is the userspace syscall contract. The
+x86_64 reference path now installs `STAR`/`LSTAR`, enters Ring 3 with a real
+`iretq` frame, and returns through `sysretq`. AArch64 and RISC-V retain the
+dispatcher-only bring-up path until their native trap frames are implemented.
 
 ### Register Passing Conventions Across Architectures
 
@@ -21,7 +21,7 @@ closed until architecture-specific trap frames and selectors are installed.
 | **Argument 1** | `RDI` | `X0` | `A0` |
 | **Argument 2** | `RSI` | `X1` | `A1` |
 | **Argument 3** | `RDX` | `X2` | `A2` |
-| **Argument 4** | `RCX` | `X3` | `A3` |
+| **Argument 4** | `R10` | `X3` | `A3` |
 | **Argument 5** | `R8` | `X4` | `A4` |
 | **Argument 6** | `R9` | `X5` | `A5` |
 | **Return Value** | `RAX` | `X0` | `A0` |
@@ -122,8 +122,8 @@ through 15:
 
 Omega reserves separate kernel and user virtual-address regions. The x86_64
 process foundation currently creates isolated roots and dedicated user PML4
-slots; native Ring 3/EL0/U-Mode execution and a complete hardware-enforced
-userspace boundary remain future work:
+slots. The x86_64 reference process has a hardware-enforced Ring 3 boundary;
+native AArch64 EL0 and RISC-V U-mode execution remain future work:
 
 ```text
 +-------------------------------------------------------+ 0xFFFFFFFFFFFFFFFF
@@ -169,7 +169,7 @@ architecture. Compatibility is defined at three different layers:
 | Artifact | Compatibility contract | Current status |
 | :--- | :--- | :--- |
 | Static library (`.a`) | Archive members must be ELF relocatable objects for the target ISA, use the target Linux psABI, and expose C/C++ symbols that the Omega SDK linker can resolve. A host Linux `.a` is not executable by itself. | **Link-time compatible when rebuilt/linked with the Omega SDK** |
-| Executable (`ET_EXEC`/static `ET_DYN`) | ELF64, little-endian, matching `e_machine`, valid `PT_LOAD` ranges, no `PT_INTERP`, no unresolved dynamic metadata, and the Linux syscall/psABI contract above. | **Bounded format validation implemented; segment mapping and full userspace execution pending** |
+| Executable (`ET_EXEC`/static `ET_DYN`) | ELF64, little-endian, matching `e_machine`, valid `PT_LOAD` ranges, no `PT_INTERP`, no unresolved dynamic metadata, and the Linux syscall/psABI contract above. | **x86_64 static ET_EXEC PT_LOAD mapping and Ring 3 execution implemented; broader process lifecycle pending** |
 | Shared object (`ET_DYN`/`.so`) | Position-independent code, ELF relocations, symbol/version resolution, `DT_NEEDED` dependency loading, and an Omega dynamic linker/loader are required. | **Not runnable yet; ABI reserved and explicitly rejected by the current loader** |
 
 ### Static libraries
@@ -183,12 +183,11 @@ versions are not ABI-compatible with Omega.
 
 ### Executables
 
-The first supported binary interchange target is a statically linked Linux
-ELF64 executable rebuilt for the Omega SDK syscall ABI. The current loader validates
-headers and program-header safety only when an image size is supplied. It does not yet map segments into an
-active userspace process, apply relocations, establish a Linux-compatible
-auxiliary vector, or enter a real userspace trap frame. Therefore a validated
-executable is not yet automatically runnable.
+The first supported binary interchange target is a statically linked ELF64
+executable rebuilt for the Omega SDK syscall ABI. x86_64 now maps validated
+`PT_LOAD` segments, creates a user stack, and enters a single PID 1 init from
+the Omega initrd. Relocations, auxiliary vectors, COW process creation,
+signals, and the AArch64/RISC-V native execution paths remain pending.
 
 ### Shared objects and dynamic linking
 

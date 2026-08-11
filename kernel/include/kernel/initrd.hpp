@@ -19,6 +19,7 @@ struct InitrdFileHeader {
 class Initrd {
 public:
     static vfs::VfsNode* init(uintptr_t location);
+    static vfs::VfsNode* find(const char* path);
 };
 
 } // namespace initrd
