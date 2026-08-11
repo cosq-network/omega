@@ -99,8 +99,8 @@ Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsys
 | **Phase 7.2b: AArch64 & RISC-V Display** | `IN PROGRESS` | SimpleFb (DT), shared FDT parser, portable framebuffer console, and guarded VirtIO-GPU MMIO foundation | FDT walker, DT pointer handoff, `SimpleFb` HALs, identity-map VMM bring-up, VirtIO-GPU protocol/queue scaffold, serial fallback | `scripts/test_display_aarch64.sh`, QEMU AArch64/RISC-V smoke tests |
 | **Phase 7.3: Keyboard/HID Input** | `IN PROGRESS` | Versioned cross-ISA input ABI, bounded event queue, HID boot-report decoders, and x86_64 PS/2 polling backend | Raw key transitions, modifier flags, relative motion, buttons, input syscalls, synthetic adapters for AArch64/RISC-V | `scripts/test_input_unit.sh`, all-ISA builds, QEMU boot markers; USB/xHCI and native IRQ delivery remain pending |
 | **Phase 7.4: SMP Multi-Core** | `PLANNED` | Symmetric multiprocessing across all cores | APIC ICR (x86), PSCI (AArch64), OpenSBI IPI (RISC-V); per-CPU run queues | Multi-core boot log, parallel thread execution |
-| **Phase 7.5: Timer-Driven Preemption** | `PARTIAL` | x86_64 PIT IRQ0, interrupt-frame scheduler switching, and guarded two-thread self-test; AArch64/RISC-V timers remain planned | QEMU x86_64 preemption/context-switch test; architecture timer ports pending |
-| **Phase 7.6: Per-Process Address Spaces** | `PARTIAL` | x86_64 cloned roots, dedicated user mapping slots, isolated anonymous `mmap`/`munmap`, process-owned credentials/descriptors, Linux syscall numbering, and bounded user-range checks; mapped `brk`, COW, native ARM/RISC-V roots, and active scheduler address-space switching remain | QEMU two-process mapping isolation plus all-ISA builds and permission checks; COW and native non-x86 page tables pending |
+| **Phase 7.5: Timer-Driven Preemption** | `PARTIAL` | x86_64 PIT IRQ0, interrupt-frame scheduler switching, guarded two-thread self-test, and TSS groundwork; the current Ring 3 init runs with interrupts masked until user-originated timer return is fully integrated; AArch64/RISC-V timers remain planned | QEMU x86_64 preemption/context-switch test, then Ring 3 timer-return test; architecture timer ports pending |
+| **Phase 7.6: Per-Process Address Spaces** | `PARTIAL` | x86_64 cloned roots, active address-space activation, dedicated user mappings, isolated anonymous `mmap`/`munmap`, process-owned credentials/descriptors, Linux syscall numbering, and bounded user-range checks; mapped `brk`, permission-aware faults, COW, native ARM/RISC-V roots, and scheduler-driven address-space switching remain | QEMU two-process mapping isolation plus user fault/permission tests; COW and native non-x86 page tables pending |
 | **Phase 7.7: IPC Foundation** | `PLANNED` | Inter-process communication for microkernel services | Message passing, capability tokens, shared-memory grants | Driver server ↔ client round-trip |
 
 **Exit criteria:** Omega boots in QEMU with block storage, **graphical console on x86_64 (done)**, SMP, preemptive scheduling, process isolation, and a userspace driver server communicating over IPC.
@@ -150,10 +150,10 @@ complete.
 | Milestone | Status | Deliverable | Verification |
 | :--- | :---: | :--- | :--- |
 | **7.D.1 Timer-independent scheduler core** | `PLANNED` | Architecture-neutral scheduler clock, priorities, accounting, and preemption hooks | Identical scheduler tests on all ISAs |
-| **7.D.2 Per-process address spaces** | `PARTIAL` | x86_64 isolated page tables, process-owned Linux-style credentials/descriptors, syscall numbering, anonymous mappings, and bounded user-range checks; mapped heap growth, COW, active switching, and native ARM/RISC-V roots remain | Two-process mapping and cross-ISA build/permission matrix; COW/fault tests pending |
+| **7.D.2 Per-process address spaces** | `PARTIAL` | x86_64 isolated page tables, active process activation, process-owned Linux-style credentials/descriptors, syscall numbering, anonymous mappings, and bounded user-range checks; mapped heap growth, permission-aware faults, COW, scheduler switching, and native ARM/RISC-V roots remain | Two-process mapping, user fault/permission, and cross-ISA build matrix; COW tests pending |
 | **7.D.3 Capability-based IPC** | `PLANNED` | Typed messages, endpoint ownership, capability transfer, shared-memory grants, timeout/cancellation | Driver-server round-trip and abuse tests |
 | **7.D.4 Portable driver contracts** | `PLANNED` | Common interrupt, DMA, MMIO, block, net, display, and input interfaces | Synthetic drivers plus all-ISA contract tests |
-| **7.D.5 Userspace bootstrap** | `PARTIAL` | x86_64 PID 1 init from initrd, PT_LOAD mapping, Ring 3 entry, native syscall return, and minimal assembly CRT/syscall stub; process lifecycle, shell, and full libc remain | `scripts/test_userland.sh`; process lifecycle and SDK expansion pending |
+| **7.D.5 Userspace bootstrap** | `PARTIAL` | x86_64 PID 1 init from initrd, PT_LOAD mapping, Ring 3 entry, native syscall return, and minimal assembly CRT/syscall stub; exit/reaping, safe user preemption, permission-aware faults, COW fork, shell, and full libc remain | `scripts/test_userland.sh`; follow-up lifecycle, fault, COW, and SDK tests pending |
 | **7.D.6 Linux identity and permission model** | `PARTIAL` | UID/GID credentials, supplementary groups, umask, root DAC rules, mode bits, VFS traversal/read/write checks, process binding on the x86_64 foundation, and Linux syscall-number tables on all ISAs | `scripts/test_security.sh`, all-ISA builds/permission checks, ext4 ownership/mode parsing |
 
 **Architecture-track exit criteria:** each target boots on its reference QEMU
@@ -162,6 +162,27 @@ isolated processes, a working storage path, network path, display or serial
 console, and a documented userspace-driver boundary. No architecture is
 considered production-ready solely because it compiles or reaches
 `kernel_main()`.
+
+### x86_64 userspace follow-up sequence
+
+The verified initrd/Ring 3/syscall slice establishes the reference ABI. The
+next implementation sequence is intentionally incremental:
+
+1. **Process exit and reaping** — make `SYS_exit` terminate the current
+   process, remove it from runnable scheduling, implement `wait4`, and safely
+   reclaim process resources.
+2. **Safe user preemption** — complete the TSS/RSP0 and interrupt-return path
+   for user-originated timer interrupts, then enable user timer preemption and
+   validate register/address-space preservation.
+3. **Permission-aware faults** — classify page faults by mapping, read/write,
+   and execute permissions; terminate only the offending process and add
+   `mprotect`-style tests.
+4. **COW `fork`** — share user pages read-only, duplicate pages on write
+   faults, and validate parent/child return values and write isolation.
+5. **Minimal C runtime** — add `crt0`, `errno`, syscall wrappers, `brk`/`mmap`,
+   a small allocator, and a C-based init program.
+6. **Cross-architecture userspace** — port the stabilized ABI and process
+   contract to AArch64 EL0, then RISC-V U-mode.
 
 ### Storage Architecture
 
@@ -251,12 +272,15 @@ Required before running on untrusted workloads or real user hardware.
 
 | Milestone | Description | Verification |
 | :--- | :--- | :--- |
-| **8.1.1 Copy-on-Write** | COW for `fork`, shared libraries, and `mmap` | Fork + write isolation test |
-| **8.1.2 Demand Paging** | Page faults load data on first access | Fault-driven page-in test |
-| **8.1.3 `mmap` / `munmap` / `mprotect`** | Full virtual memory API for userland | libc mmap test suite |
-| **8.1.4 W^X Enforcement** | Writable and executable pages are mutually exclusive | Attempt execute-from-writable page → fault |
-| **8.1.5 ASLR** | Randomized base addresses for executables, heap, stack | Address layout entropy check |
-| **8.1.6 OOM Handling** | Memory pressure callbacks and process termination policy | Allocation failure under pressure |
+| **8.1.1 Process exit and reaping** | Implement `SYS_exit`, dead-process scheduling, `wait4`, child status, and safe process-table cleanup | Init exit plus parent/child reaping test |
+| **8.1.2 User timer preemption** | Complete TSS/RSP0 and interrupt return from Ring 3, then enable safe timer-driven preemption for user processes | Ring 3 timer tick and context-preservation test |
+| **8.1.3 Permission-aware page faults** | Distinguish unmapped, read-only, non-executable, and kernel-only access; terminate the offending process instead of panicking the kernel | Invalid read/write/execute fault tests |
+| **8.1.4 Copy-on-Write** | COW for `fork`, shared libraries, and `mmap` | Fork + write isolation test |
+| **8.1.5 Demand Paging** | Page faults load data on first access | Fault-driven page-in test |
+| **8.1.6 `mmap` / `munmap` / `mprotect`** | Full virtual memory API for userland | libc mmap/mprotect test suite |
+| **8.1.7 W^X Enforcement** | Writable and executable pages are mutually exclusive | Attempt execute-from-writable page → fault |
+| **8.1.8 ASLR** | Randomized base addresses for executables, heap, stack | Address layout entropy check |
+| **8.1.9 OOM Handling** | Memory pressure callbacks and process termination policy | Allocation failure under pressure |
 
 ### 8.2 Concurrency & Scheduling
 
@@ -574,13 +598,13 @@ Year 4–5      Phase 10C + 11       Phone product, public release, OEM partners
 
 Concrete sequence mapped to the existing codebase:
 
-1. **Complete shared Phase 7 services** — architecture-native timer/SMP support, active per-process address-space switching, fault-safe user-pointer validation, COW, capability IPC, portable DMA/MMIO contracts, Linux-compatible userspace init, and process reaping.
+1. **Complete the x86_64 userspace follow-up sequence** — process exit/reaping, safe Ring 3 timer preemption, permission-aware page faults, COW `fork`, and the minimal C runtime described above.
 2. **Finish x86_64 P0 parity** — ACPI, APIC/x2APIC, HPET/TSC, SMP, MSI/MSI-X, UEFI GOP, PCIe ECAM, and hardened memory permissions on QEMU `q35`.
 3. **Finish AArch64 P0 parity** — PSCI, complete GICv3 support, generic timers, SMP, cache/MMU attributes, UEFI/DT normalization, and VirtIO-MMIO completion on QEMU `virt`.
 4. **Advance RISC-V P1 parity** — SBI HSM/timer/IPI services, SMP, PLIC hardening, AIA capability planning, Sv48/PMP preparation, and VirtIO-MMIO completion on QEMU `virt`.
 5. **Complete storage and display reference paths** — NVMe/AHCI/SDHCI/USB layers, ext4 writeback, AArch64/RISC-V VirtIO-GPU, UEFI GOP, and real framebuffer integration. *(Standard VGA and x86_64 transitional VirtIO-Block completion are validated.)*
 6. **Validate one reference board per ISA** — QEMU `q35`/OVMF, QEMU AArch64 `virt`, QEMU RISC-V `virt`, then Raspberry Pi 4/5 and one x86_64 laptop.
-7. **Extend the userspace base** — Process lifecycle (`exit`, `wait4`, COW `fork`), serial shell, Omega SDK CRT/libc, process tools, filesystem utilities, passwd/group/permission tooling, and a versioned Linux-compatible syscall/IPC ABI in `docs/ABI.md`. The first x86_64 init/ELF/Ring 3/syscall slice is now verified by `scripts/test_userland.sh`.
+7. **Extend the userspace base** — After the x86_64 lifecycle milestones, add a serial shell, Omega SDK CRT/libc, process tools, filesystem utilities, passwd/group/permission tooling, and a versioned Linux-compatible syscall/IPC ABI in `docs/ABI.md`. The first x86_64 init/ELF/Ring 3/syscall slice is verified by `scripts/test_userland.sh`.
 8. **Move drivers behind IPC** — Storage, network, display, input, and USB as capability-scoped userspace servers with measured IPC overhead.
 9. **Keep OVD aligned with kernel maturity** — Add architecture capability gates, live boot matrices, device hotplug scenarios, artifact manifests, and profile readiness checks for each QEMU reference target.
 10. **Defer phone work** — Until x86_64 and AArch64 laptop/tablet reference systems demonstrate reliable boot, storage, networking, display, input, power, recovery, and userspace quality.
