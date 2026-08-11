@@ -145,11 +145,17 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
             for (uint64_t cursor = copy_start; cursor < copy_end; ++cursor)
                 destination[cursor - page_start] = elf_data[ph->p_offset + cursor - ph->p_vaddr];
             if (process->mapping_count >= 32) return false;
-            process->mappings[process->mapping_count++] = {address, memory::PAGE_SIZE};
+            process->mappings[process->mapping_count++] = {address, memory::PAGE_SIZE, false};
         }
     }
 
+#if defined(__riscv)
+    constexpr uintptr_t stack_top = 0x000000006ffff000ull;
+#elif defined(__aarch64__)
+    constexpr uintptr_t stack_top = 0x0000006fffff0000ull;
+#else
     constexpr uintptr_t stack_top = 0x00007ffffff00000ull;
+#endif
     constexpr uintptr_t stack_page = stack_top - memory::PAGE_SIZE;
     const uintptr_t frame = memory::PhysicalMemoryManager::alloc_frame();
     if (frame == 0 || !memory::VirtualMemoryManager::map_page(&process->address_space, stack_page, frame,
@@ -157,7 +163,7 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
     auto* stack_memory = reinterpret_cast<uint8_t*>(frame);
     for (size_t i = 0; i < memory::PAGE_SIZE; ++i) stack_memory[i] = 0;
     if (process->mapping_count >= 32) return false;
-    process->mappings[process->mapping_count++] = {stack_page, memory::PAGE_SIZE};
+    process->mappings[process->mapping_count++] = {stack_page, memory::PAGE_SIZE, false};
     *entry = static_cast<uintptr_t>(header->e_entry);
     *stack = stack_top - 16;
     process->user_entry = *entry;

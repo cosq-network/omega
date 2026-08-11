@@ -13,6 +13,7 @@ using pid_t = int32_t;
 struct Mapping {
     uintptr_t address;
     size_t length;
+    bool cow;
 };
 
 struct Process {
@@ -21,6 +22,11 @@ struct Process {
     uintptr_t next_mmap;
     uintptr_t program_break;
     bool alive;
+    bool exited;
+    int32_t exit_status;
+    Process* parent;
+    Process* children[8];
+    uint32_t child_count;
     security::Credentials credentials;
     vfs::VfsNode* fd_table[16];
     Mapping mappings[32];
@@ -39,6 +45,9 @@ public:
     static int64_t munmap(uintptr_t address, size_t length);
     static int64_t brk(uintptr_t address);
     static int64_t fork();
+    static int64_t exit(int32_t status);
+    static int64_t wait4(pid_t pid, int32_t* status);
+    static bool handle_cow_fault(uintptr_t address);
     static int64_t self_test();
     static bool activate(Process* process);
 };

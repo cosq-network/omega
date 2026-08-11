@@ -29,13 +29,13 @@
 - **Dynamic Kernel Heap Allocator**: Free-list block header allocator providing standard C ABI bindings (`kmalloc` / `kfree`) with 8-byte alignment and block coalescing.
 - **Hardware Interrupt Architecture**: 256-entry Interrupt Descriptor Table (IDT) for x86_64, System Vector Base (`VBAR_EL1`) for AArch64, and Supervisor Trap Vector (`stvec`) / PLIC for RISC-V 64.
 - **Preemptive Multi-threading Scheduler**: Round-robin TCB engine with x86_64 PIT preemption, real interrupt-frame context switching, cooperative yield integration, and guarded cross-architecture fallback behavior.
-- **Linux-Compatible System Call ABI**: Architecture-specific Linux syscall numbering for x86_64, AArch64, and RISC-V 64, six-argument dispatch, Linux-style negative errno returns, and memory/process/credential syscall foundations. x86_64 now has native `syscall`/`sysretq` Ring 3 entry; AArch64/RISC-V remain dispatcher-only. See [`docs/ABI.md`](docs/ABI.md).
+- **Linux-Compatible System Call ABI**: Architecture-specific Linux syscall numbering for x86_64, AArch64, and RISC-V 64, six-argument dispatch, Linux-style negative errno returns, and native x86_64 `syscall`/`sysretq`, AArch64 `svc`/`eret`, and RISC-V `ecall`/`sret` entry paths. See [`docs/ABI.md`](docs/ABI.md).
 - **Keyboard and HID Input Foundation**: Versioned 64-byte input events, bounded kernel queue, raw keyboard transitions, modifier flags, relative mouse motion, buttons, input syscalls, HID boot-report decoders, and x86_64 PS/2 polling with portable AArch64/RISC-V adapters.
 - **Virtual Filesystem (VFS) & Initrd RAM Disk**: POSIX-like node tree with Linux-style UID/GID ownership, mode bits, umask-aware security foundations, traversal checks, and read/write permission enforcement.
 - **Linux-Compatible Users, Groups & Permissions**: Real/effective/saved filesystem IDs, supplementary groups, root DAC behavior, `chmod`/`chown`, `setuid`/`setgid`, `setgroups`, `umask`, and shared permission semantics on all three ISAs.
-- **Process Address-Space Foundation**: x86_64 cloned page-table roots, active user address-space switching, dedicated user mappings, process-owned credentials/descriptors, isolated anonymous `mmap`/`munmap`, and QEMU mapping-isolation verification; COW `fork`, mapped `brk`, isolated `execve`, and native AArch64/RISC-V process page tables remain planned.
+- **Process Address Spaces**: Per-process roots with user mappings on x86_64, AArch64, and Sv39 RISC-V; permission-bearing ELF PT_LOAD mapping, retained physical frames, COW fork/fault handling, exit status, and wait/reap bookkeeping.
 - **x86_64 Userspace Bootstrap**: Initrd-backed static `/init`, ELF `PT_LOAD` segment mapping, user stack creation, Ring 3 `iretq` entry, TSS-backed kernel stack, page-fault entry, and native `syscall`/`sysretq` return. Verify with [`scripts/test_userland.sh`](scripts/test_userland.sh).
-- **Userland Mode Manager**: Real x86_64 Ring 3 entry with architecture-specific trap setup; AArch64 EL0 and RISC-V U-mode transitions remain pending.
+- **Userland Mode Manager**: Real x86_64 Ring 3, AArch64 EL0, and RISC-V U-mode entry, with lower-privilege syscall/fault vectors and architecture-specific timer setup.
 - **ELF 64-bit Executable Loader**: Bounded matching-ISA validation plus x86_64 static `ET_EXEC` `PT_LOAD` mapping and execution; relocations, dynamic linking, and broader process lifecycle remain pending.
 - **Linux ELF Artifact Boundary**: Validates matching-ISA ELF64 `ET_EXEC`/static `ET_DYN` program headers; static archives are link-time inputs, while dynamic `.so` execution remains gated on Omega's future dynamic linker.
 - **PCI Bus Scanner**: Bus configuration space reader (`0xCF8` Address / `0xCFC` Data ports) enumerating vendor/device IDs across 256 PCI buses.
@@ -73,13 +73,13 @@
 
 **x86_64 (Phase 7.2 — done):** VGA text mode, Bochs VBE linear FB, Multiboot2 handoff, dual serial+display console.
 
-**AArch64 / RISC-V (Phase 7.2b — in progress):** Shared FDT parsing, boot-time DT pointer handoff, SimpleFb HALs, serial fallback, and portable framebuffer-console integration are implemented. VirtIO-GPU and UEFI GOP handoff remain planned.
+**AArch64 / RISC-V:** Shared FDT parsing, framebuffer fallback, native lower-privilege entry/traps, per-process TTBR0/Sv39 roots, ELF `/init`, and timer setup are implemented. VirtIO-GPU, SMP, and production interrupt-controller support remain planned.
 
 **Userspace (x86_64 reference slice):** A freestanding static `/init` is built,
 packed into the Omega initrd format, loaded into PID 1's isolated address
 space, and entered in Ring 3. The init program performs `SYS_write` and
 `SYS_exit` through the native x86_64 syscall path. Full libc, process reaping,
-COW `fork`, signals, and non-x86 native userspace remain future work.
+COW `fork`, exit/wait lifecycle, and native non-x86 userspace are now present; signals, scheduler-integrated process switching, and dynamic linking remain future work.
 
 **Storage:** The architecture and initial implementation are specified in [`docs/STORAGE_ARCHITECTURE_PLAN.md`](docs/STORAGE_ARCHITECTURE_PLAN.md). The common layer is implemented and tested; GPT/MBR parsing, synthetic writes/flushes, and guarded VirtIO-Block request paths are available. NVMe, AHCI/SATA/ATAPI, SDHCI, USB Mass Storage, filesystem mounting, and hardware-specific writes remain subsequent milestones.
 
@@ -180,7 +180,7 @@ omega/
 │   ├── test_security.sh           # Linux credentials and VFS permission tests
 │   ├── test_scheduler.sh          # x86_64 timer/context-switch test
 │   ├── test_elf_loader.sh         # Linux ELF64 artifact validation test
-│   ├── build_user_init.sh          # Build the x86_64 static userspace /init
+│   ├── build_user_init.sh          # Build the architecture-specific userspace /init
 │   ├── create_initrd.py            # Pack userspace artifacts into an Omega initrd
 │   ├── test_userland.sh            # x86_64 ELF/Ring 3/syscall integration test
 │   ├── test_scripts_unit.py       # Python launcher and emulator unit-test entry point

@@ -28,6 +28,8 @@ public:
     static bool map_page(AddressSpace* space, uintptr_t virt_addr, uintptr_t phys_addr, uint32_t flags);
     static bool unmap_page(AddressSpace* space, uintptr_t virt_addr);
     static uintptr_t get_physical_address(const AddressSpace* space, uintptr_t virt_addr);
+    static uint32_t get_page_flags(const AddressSpace* space, uintptr_t virt_addr);
+    static bool set_page_flags(AddressSpace* space, uintptr_t virt_addr, uint32_t flags);
     static bool activate(const AddressSpace* space);
 
 private:

@@ -36,10 +36,13 @@ static uint64_t arm_attrs(uint32_t flags) {
 static void arm_setup() {
     for (uint32_t i = 0; i < 512; ++i) arm_l0[i] = 0;
     arm_l0[0] = reinterpret_cast<uintptr_t>(&arm_l1[0][0]) | ARM_VALID | ARM_TABLE;
-    for (uint32_t block = 0; block < 512; ++block) {
+    // Keep the low 1 GiB identity mapped for the kernel and leave the rest
+    // of the user VA space available for per-process 4 KiB mappings.
+    for (uint32_t block = 0; block < 1; ++block) {
         const uintptr_t phys = static_cast<uintptr_t>(block) * BLOCK_SIZE * 512;
         arm_l1[0][block] = phys | arm_attrs(PAGE_PRESENT | PAGE_WRITABLE | PAGE_EXEC);
     }
+    for (uint32_t block = 1; block < 512; ++block) arm_l1[0][block] = 0;
 }
 #endif
 
@@ -61,10 +64,11 @@ static uint64_t rv_flags(uint32_t flags) {
 
 static void rv_setup() {
     for (uint32_t i = 0; i < 512; ++i) rv_root[i] = 0;
-    for (uint32_t region = 0; region < 512; ++region) {
-        const uintptr_t phys = static_cast<uintptr_t>(region) * 0x40000000ull;
-        rv_root[region] = (phys >> 12) << 10 | rv_flags(PAGE_PRESENT | PAGE_WRITABLE | PAGE_EXEC);
-    }
+    // Sv39 root entries are 1 GiB leaves. Preserve the low identity window
+    // and the kernel's 0x80200000 image while reserving root index 1 for
+    // user mappings.
+    rv_root[0] = rv_flags(PAGE_PRESENT | PAGE_WRITABLE | PAGE_EXEC);
+    rv_root[2] = (0x80000000ull >> 12) << 10 | rv_flags(PAGE_PRESENT | PAGE_WRITABLE | PAGE_EXEC);
 }
 #endif
 
@@ -119,6 +123,36 @@ static bool user_address(uintptr_t address) {
     return canonical_address(address) && address < 0x0000800000000000ull;
 }
 #endif
+
+#if defined(__aarch64__)
+static uintptr_t arm_alloc_table() {
+    const uintptr_t frame = PhysicalMemoryManager::alloc_frame();
+    if (!frame) return 0;
+    auto* table = reinterpret_cast<uint64_t*>(frame);
+    for (uint32_t i = 0; i < 512; ++i) table[i] = 0;
+    return frame;
+}
+
+static uint64_t arm_table_desc(uintptr_t address) { return address | ARM_VALID | ARM_TABLE; }
+static uint64_t arm_leaf_attrs(uint32_t flags) {
+    uint64_t attrs = arm_attrs(flags);
+    // AP=01: EL0 read/write; AP=11: EL0 read-only.
+    attrs &= ~(3ull << 6);
+    attrs |= (flags & PAGE_WRITABLE) ? (1ull << 6) : (3ull << 6);
+    return attrs;
+}
+#endif
+
+#if defined(__riscv)
+static uintptr_t rv_alloc_table() {
+    const uintptr_t frame = PhysicalMemoryManager::alloc_frame();
+    if (!frame) return 0;
+    auto* table = reinterpret_cast<uint64_t*>(frame);
+    for (uint32_t i = 0; i < 512; ++i) table[i] = 0;
+    return frame;
+}
+static uint64_t rv_table_desc(uintptr_t address) { return (address >> 12) << 10 | RV_V; }
+#endif
 }
 
 void VirtualMemoryManager::init() {
@@ -141,11 +175,11 @@ bool VirtualMemoryManager::map_page(uintptr_t virt_addr, uintptr_t phys_addr, ui
     AddressSpace current{current_pml4_or_ttbr & X86_ADDR_MASK, true};
     return map_page(&current, virt_addr, phys_addr, flags);
 #elif defined(__aarch64__)
-    // The initial ARM tables use 2 MiB identity blocks. Preserve that mapping
-    // contract until a dedicated split-table allocator is added.
-    return virt_addr == phys_addr && in_identity_window(virt_addr) && (flags & PAGE_PRESENT);
+    AddressSpace current{current_pml4_or_ttbr, true};
+    return map_page(&current, virt_addr, phys_addr, flags);
 #elif defined(__riscv)
-    return virt_addr == phys_addr && in_identity_window(virt_addr) && (flags & PAGE_PRESENT);
+    AddressSpace current{current_pml4_or_ttbr, true};
+    return map_page(&current, virt_addr, phys_addr, flags);
 #else
     (void)flags;
     return false;
@@ -158,7 +192,8 @@ bool VirtualMemoryManager::unmap_page(uintptr_t virt_addr) {
     AddressSpace current{current_pml4_or_ttbr & X86_ADDR_MASK, true};
     return unmap_page(&current, virt_addr);
 #else
-    return in_identity_window(virt_addr);
+    AddressSpace current{current_pml4_or_ttbr, true};
+    return unmap_page(&current, virt_addr);
 #endif
 }
 
@@ -167,7 +202,8 @@ uintptr_t VirtualMemoryManager::get_physical_address(uintptr_t virt_addr) {
     AddressSpace current{current_pml4_or_ttbr & X86_ADDR_MASK, true};
     return get_physical_address(&current, virt_addr);
 #else
-    return in_identity_window(virt_addr) ? virt_addr : 0;
+    AddressSpace current{current_pml4_or_ttbr, true};
+    return get_physical_address(&current, virt_addr);
 #endif
 }
 
@@ -207,9 +243,27 @@ bool VirtualMemoryManager::create_address_space(AddressSpace* space) {
     space->valid = true;
     return true;
 #else
-    space->root = 0;
-    space->valid = false;
-    return false;
+#if defined(__aarch64__)
+    const uintptr_t root = arm_alloc_table();
+    const uintptr_t l1 = arm_alloc_table();
+    if (!root || !l1) return false;
+    auto* dst = reinterpret_cast<uint64_t*>(root);
+    auto* src = reinterpret_cast<uint64_t*>(reinterpret_cast<uintptr_t>(&arm_l0[0]));
+    for (uint32_t i = 0; i < 512; ++i) dst[i] = src[i];
+    auto* dst_l1 = reinterpret_cast<uint64_t*>(l1);
+    auto* src_l1 = reinterpret_cast<uint64_t*>(src[0] & ~0xfffull);
+    for (uint32_t i = 0; i < 512; ++i) dst_l1[i] = src_l1[i];
+    dst[0] = arm_table_desc(l1);
+    space->root = root; space->valid = true; return true;
+#elif defined(__riscv)
+    const uintptr_t root = rv_alloc_table();
+    if (!root) return false;
+    auto* dst = reinterpret_cast<uint64_t*>(root);
+    for (uint32_t i = 0; i < 512; ++i) dst[i] = rv_root[i];
+    space->root = root; space->valid = true; return true;
+#else
+    space->root = 0; space->valid = false; return false;
+#endif
 #endif
 }
 
@@ -261,8 +315,41 @@ bool VirtualMemoryManager::map_page(AddressSpace* space, uintptr_t virt_addr,
     table[indexes[3]] = phys_addr | leaf_flags(flags);
     return true;
 #else
-    (void)space; (void)virt_addr; (void)phys_addr; (void)flags;
-    return false;
+#if defined(__aarch64__)
+    if (!space || !space->valid || !(flags & PAGE_PRESENT) || phys_addr == 0) return false;
+    virt_addr &= ~(PAGE_SIZE - 1); phys_addr &= ~(PAGE_SIZE - 1);
+    auto* l0 = reinterpret_cast<uint64_t*>(space->root);
+    const uint32_t i0 = (virt_addr >> 39) & 0x1ff, i1 = (virt_addr >> 30) & 0x1ff,
+                   i2 = (virt_addr >> 21) & 0x1ff, i3 = (virt_addr >> 12) & 0x1ff;
+    uint64_t* l1;
+    if (!(l0[i0] & ARM_VALID)) { const uintptr_t p = arm_alloc_table(); if (!p) return false; l0[i0] = arm_table_desc(p); }
+    l1 = reinterpret_cast<uint64_t*>(l0[i0] & ~0x3ull);
+    uint64_t* l2;
+    if (!(l1[i1] & ARM_VALID)) { const uintptr_t p = arm_alloc_table(); if (!p) return false; l1[i1] = arm_table_desc(p); }
+    if (!(l1[i1] & ARM_TABLE)) return false;
+    l2 = reinterpret_cast<uint64_t*>(l1[i1] & ~0x3ull);
+    uint64_t* l3;
+    if (!(l2[i2] & ARM_VALID)) { const uintptr_t p = arm_alloc_table(); if (!p) return false; l2[i2] = arm_table_desc(p); }
+    if (!(l2[i2] & ARM_TABLE)) return false;
+    l3 = reinterpret_cast<uint64_t*>(l2[i2] & ~0x3ull);
+    if (l3[i3] & ARM_VALID) return false;
+    l3[i3] = phys_addr | arm_leaf_attrs(flags); return true;
+#elif defined(__riscv)
+    if (!space || !space->valid || !(flags & PAGE_PRESENT) || phys_addr == 0) return false;
+    virt_addr &= ~(PAGE_SIZE - 1); phys_addr &= ~(PAGE_SIZE - 1);
+    auto* l2 = reinterpret_cast<uint64_t*>(space->root);
+    const uint32_t i2 = (virt_addr >> 30) & 0x1ff, i1 = (virt_addr >> 21) & 0x1ff, i0 = (virt_addr >> 12) & 0x1ff;
+    if (l2[i2] & (RV_R | RV_W | RV_X)) return false;
+    if (!(l2[i2] & RV_V)) { const uintptr_t p = rv_alloc_table(); if (!p) return false; l2[i2] = rv_table_desc(p); }
+    auto* l1 = reinterpret_cast<uint64_t*>((l2[i2] >> 10) << 12);
+    if (l1[i1] & (RV_R | RV_W | RV_X)) return false;
+    if (!(l1[i1] & RV_V)) { const uintptr_t p = rv_alloc_table(); if (!p) return false; l1[i1] = rv_table_desc(p); }
+    auto* l0 = reinterpret_cast<uint64_t*>((l1[i1] >> 10) << 12);
+    if (l0[i0] & RV_V) return false;
+    l0[i0] = (phys_addr >> 12) << 10 | rv_flags(flags); return true;
+#else
+    (void)space; (void)virt_addr; (void)phys_addr; (void)flags; return false;
+#endif
 #endif
 }
 
@@ -288,8 +375,22 @@ bool VirtualMemoryManager::unmap_page(AddressSpace* space, uintptr_t virt_addr) 
     }
     return true;
 #else
-    (void)space; (void)virt_addr;
-    return false;
+#if defined(__aarch64__)
+    if (!space || !space->valid) return false; virt_addr &= ~(PAGE_SIZE - 1);
+    auto* l0 = reinterpret_cast<uint64_t*>(space->root); uint32_t i0=(virt_addr>>39)&511,i1=(virt_addr>>30)&511,i2=(virt_addr>>21)&511,i3=(virt_addr>>12)&511;
+    if (!(l0[i0]&ARM_TABLE)) return false; auto* l1=reinterpret_cast<uint64_t*>(l0[i0]&~3ull);
+    if (!(l1[i1]&ARM_TABLE)) return false; auto* l2=reinterpret_cast<uint64_t*>(l1[i1]&~3ull);
+    if (!(l2[i2]&ARM_TABLE)) return false; auto* l3=reinterpret_cast<uint64_t*>(l2[i2]&~3ull);
+    if (!(l3[i3]&ARM_VALID)) return false; l3[i3]=0; asm volatile("dsb ish; tlbi vae1is, %0; dsb ish; isb" : : "r"(virt_addr>>12) : "memory"); return true;
+#elif defined(__riscv)
+    if (!space || !space->valid) return false; virt_addr &= ~(PAGE_SIZE - 1);
+    auto* l2=reinterpret_cast<uint64_t*>(space->root); uint32_t i2=(virt_addr>>30)&511,i1=(virt_addr>>21)&511,i0=(virt_addr>>12)&511;
+    if (!(l2[i2]&RV_V) || (l2[i2]&(RV_R|RV_W|RV_X))) return false; auto* l1=reinterpret_cast<uint64_t*>((l2[i2]>>10)<<12);
+    if (!(l1[i1]&RV_V) || (l1[i1]&(RV_R|RV_W|RV_X))) return false; auto* l0=reinterpret_cast<uint64_t*>((l1[i1]>>10)<<12);
+    if (!(l0[i0]&RV_V)) return false; l0[i0]=0; asm volatile("sfence.vma %0" : : "r"(virt_addr) : "memory"); return true;
+#else
+    (void)space; (void)virt_addr; return false;
+#endif
 #endif
 }
 
@@ -312,9 +413,38 @@ uintptr_t VirtualMemoryManager::get_physical_address(const AddressSpace* space, 
         table = x86_table(entry);
     }
 #else
+#if defined(__aarch64__)
+    if (!space || !space->valid) return 0; auto page=virt_addr&~(PAGE_SIZE-1); auto* l0=reinterpret_cast<uint64_t*>(space->root); uint32_t i0=(page>>39)&511,i1=(page>>30)&511,i2=(page>>21)&511,i3=(page>>12)&511;
+    if (!(l0[i0]&ARM_VALID)) return 0; auto* l1=reinterpret_cast<uint64_t*>(l0[i0]&~3ull); if (!(l1[i1]&ARM_VALID)) return 0; if (!(l1[i1]&ARM_TABLE)) return (l1[i1]&~0x1fffffull)|(virt_addr&0x3fffffff);
+    auto* l2=reinterpret_cast<uint64_t*>(l1[i1]&~3ull); if (!(l2[i2]&ARM_VALID)) return 0; if (!(l2[i2]&ARM_TABLE)) return (l2[i2]&~0x1fffffull)|(virt_addr&0x1fffff); auto* l3=reinterpret_cast<uint64_t*>(l2[i2]&~3ull); return (l3[i3]&~0xfffull)|(virt_addr&0xfff);
+#elif defined(__riscv)
+    if (!space || !space->valid) return 0; auto page=virt_addr&~(PAGE_SIZE-1); auto* l2=reinterpret_cast<uint64_t*>(space->root); uint32_t i2=(page>>30)&511,i1=(page>>21)&511,i0=(page>>12)&511; if (!(l2[i2]&RV_V)) return 0; if (l2[i2]&(RV_R|RV_W|RV_X)) return ((l2[i2]>>10)<<12)|(virt_addr&0x3fffffff); auto* l1=reinterpret_cast<uint64_t*>((l2[i2]>>10)<<12); if (!(l1[i1]&RV_V)) return 0; if (l1[i1]&(RV_R|RV_W|RV_X)) return ((l1[i1]>>10)<<12)|(virt_addr&0x1fffff); auto* l0=reinterpret_cast<uint64_t*>((l1[i1]>>10)<<12); return (l0[i0]&~0x3ffull)<<2 | (virt_addr&0xfff);
+#else
     (void)space; (void)virt_addr;
 #endif
+#endif
     return 0;
+}
+
+uint32_t VirtualMemoryManager::get_page_flags(const AddressSpace* space, uintptr_t virt_addr) {
+#if defined(__x86_64__)
+    if (!space || !space->valid) return 0;
+    auto* table = x86_table(space->root);
+    const uint32_t ix[4] = {static_cast<uint32_t>((virt_addr>>39)&511), static_cast<uint32_t>((virt_addr>>30)&511), static_cast<uint32_t>((virt_addr>>21)&511), static_cast<uint32_t>((virt_addr>>12)&511)};
+    for (int level=0; level<3; ++level) { uint64_t e=table[ix[level]]; if (!(e&X86_PRESENT) || (e&X86_HUGE)) return 0; table=x86_table(e); }
+    const uint64_t e=table[ix[3]]; if (!(e&X86_PRESENT)) return 0; uint32_t f=PAGE_PRESENT; if(e&X86_WRITABLE)f|=PAGE_WRITABLE; if(e&X86_USER)f|=PAGE_USER; if(!(e&X86_NX))f|=PAGE_EXEC; return f;
+#else
+    (void)space; (void)virt_addr; return 0;
+#endif
+}
+
+bool VirtualMemoryManager::set_page_flags(AddressSpace* space, uintptr_t virt_addr, uint32_t flags) {
+#if defined(__x86_64__)
+    if (!space || !space->valid) return false; auto* table=x86_table(space->root); const uint32_t ix[4]={static_cast<uint32_t>((virt_addr>>39)&511),static_cast<uint32_t>((virt_addr>>30)&511),static_cast<uint32_t>((virt_addr>>21)&511),static_cast<uint32_t>((virt_addr>>12)&511)};
+    for(int level=0;level<3;++level){uint64_t e=table[ix[level]];if(!(e&X86_PRESENT)||(e&X86_HUGE))return false;table=x86_table(e);} uint64_t& e=table[ix[3]];if(!(e&X86_PRESENT))return false; const uintptr_t phys=e&X86_ADDR_MASK; e=phys|leaf_flags(flags); if((space->root&X86_ADDR_MASK)==(current_pml4_or_ttbr&X86_ADDR_MASK))asm volatile("invlpg (%0)"::"r"(virt_addr):"memory"); return true;
+#else
+    (void)space; (void)virt_addr; (void)flags; return false;
+#endif
 }
 
 bool VirtualMemoryManager::activate(const AddressSpace* space) {
@@ -324,8 +454,13 @@ bool VirtualMemoryManager::activate(const AddressSpace* space) {
     asm volatile("mov %0, %%cr3" : : "r"(space->root) : "memory");
     return true;
 #else
-    (void)space;
-    return false;
+#if defined(__aarch64__)
+    if (!space || !space->valid) return false; current_pml4_or_ttbr=space->root; asm volatile("msr ttbr0_el1, %0; dsb ish; isb" : : "r"(space->root) : "memory"); return true;
+#elif defined(__riscv)
+    if (!space || !space->valid) return false; current_pml4_or_ttbr=(8ull<<60)|(space->root>>12); asm volatile("csrw satp, %0; sfence.vma" : : "r"(current_pml4_or_ttbr) : "memory"); return true;
+#else
+    (void)space; return false;
+#endif
 #endif
 }
 

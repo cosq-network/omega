@@ -214,6 +214,9 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
     scheduler::Scheduler::create_thread(scheduler_test_thread_b);
 #endif
 #endif
+#if defined(__aarch64__) || defined(__riscv)
+    hal::timer_init(100);
+#endif
 
     // Initialize System Call Engine & POSIX Surface
     syscall::SyscallDispatcher::init();
@@ -224,8 +227,14 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
         kernel::kprintf("[TEST][PASS] ext4 root filesystem mounted\n");
     }
 
-    // Initialize Initrd RAM Disk at 0x600000
-    initrd::Initrd::init(0x600000);
+    // QEMU places initrd images in the platform RAM window.
+#if defined(__riscv)
+    initrd::Initrd::init(0x81000000ull);
+#elif defined(__aarch64__)
+    initrd::Initrd::init(0x44000000ull);
+#else
+    initrd::Initrd::init(0x600000ull);
+#endif
 
     // Scan PCI Bus Devices
     hal::PciBus::scan();
@@ -237,9 +246,9 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
     userland::UserlandManager::init();
 
     // Replace the bring-up mock with the first real Omega userspace process.
-    // The x86_64 reference path consumes /init from the RAM initrd, maps its
-    // PT_LOAD segments into PID 1's address space, and enters Ring 3.
-#if defined(__x86_64__)
+    // Every reference architecture consumes the same /init ELF and enters
+    // its native least-privileged execution level.
+#if defined(__x86_64__) || defined(__aarch64__) || defined(__riscv)
     auto* init_file = initrd::Initrd::find("/init");
     auto* init_process = process::Manager::current();
     uintptr_t user_entry = 0;
@@ -252,15 +261,17 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
         kernel::kprintf("[+] ELF PT_LOAD segments mapped for /init.\n");
         kernel::kprintf("[TEST][PASS] PID 1 userspace address space activated\n");
         userland::UserlandManager::init_x86_syscall_stack();
+#if defined(__aarch64__)
+        userland::UserlandManager::init_aarch64_exception_stack();
+#elif defined(__riscv)
+        userland::UserlandManager::init_riscv_exception_stack();
+#endif
         userland::UserlandManager::enter_userland(user_entry, user_stack);
     } else {
         kernel::kprintf("[!] /init unavailable; staying in kernel idle loop.\n");
         uintptr_t elf_entry = elf::ElfLoader::load(mock_elf_binary, sizeof(mock_elf_binary));
         if (elf_entry) kernel::kprintf("[+] ELF Executable Binary Successfully Parsed & Loaded!\n");
     }
-#else
-    uintptr_t elf_entry = elf::ElfLoader::load(mock_elf_binary, sizeof(mock_elf_binary));
-    if (elf_entry) kernel::kprintf("[+] ELF Executable Binary Successfully Parsed & Loaded!\n");
 #endif
 
     kernel::kprintf("[+] System online. Entering idle loop...\n");

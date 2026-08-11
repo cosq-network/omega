@@ -9,8 +9,16 @@ namespace {
 // Keep user mappings in PML4 slots separate from the low kernel identity
 // map.  This allows a new address space to retain all kernel/device mappings
 // while dropping inherited user mappings.
+#if defined(__riscv)
+constexpr uintptr_t USER_MMAP_BASE = 0x0000000040000000ull;
+constexpr uintptr_t USER_MMAP_LIMIT = 0x0000000070000000ull;
+#elif defined(__aarch64__)
+constexpr uintptr_t USER_MMAP_BASE = 0x0000004000000000ull;
+constexpr uintptr_t USER_MMAP_LIMIT = 0x0000007000000000ull;
+#else
 constexpr uintptr_t USER_MMAP_BASE = 0x0000400000000000ull;
 constexpr uintptr_t USER_MMAP_LIMIT = 0x0000700000000000ull;
+#endif
 constexpr uint32_t PROT_WRITE = 2;
 constexpr uint32_t PROT_EXEC = 4;
 #if defined(__x86_64__)
@@ -50,7 +58,7 @@ static bool overlaps(const Process* process, uintptr_t address, size_t length) {
 
 static bool add_mapping(Process* process, uintptr_t address, size_t length) {
     if (process->mapping_count >= 32) return false;
-    process->mappings[process->mapping_count++] = {address, length};
+    process->mappings[process->mapping_count++] = {address, length, false};
     return true;
 }
 }
@@ -78,6 +86,8 @@ Process* Manager::create() {
     process->next_mmap = USER_MMAP_BASE;
     process->program_break = 0x60000000ull;
     process->alive = false;
+    process->exited = false; process->exit_status = 0; process->parent = nullptr; process->child_count = 0;
+    for (auto*& child : process->children) child = nullptr;
     process->credentials = security::Manager::current();
     for (auto& fd : process->fd_table) fd = nullptr;
     process->mapping_count = 0;
@@ -165,9 +175,30 @@ int64_t Manager::brk(uintptr_t address) {
 }
 
 int64_t Manager::fork() {
-    // A Linux-compatible fork must provide COW page semantics. Returning
-    // ENOSYS is safer than duplicating only metadata and exposing shared data.
-    return -ERR_ENOSYS;
+    if (!current_process) return -ERR_ENOMEM;
+    Process* parent=current_process; Process* child=create();
+    if (!child || parent->child_count>=8) return -ERR_ENOMEM;
+    child->parent=parent;
+    for(uint32_t i=0;i<parent->mapping_count;++i){const Mapping&m=parent->mappings[i];for(size_t off=0;off<m.length;off+=memory::PAGE_SIZE){const uintptr_t va=m.address+off,phys=memory::VirtualMemoryManager::get_physical_address(&parent->address_space,va);if(!phys)return -ERR_ENOMEM;uint32_t flags=memory::VirtualMemoryManager::get_page_flags(&parent->address_space,va);if(flags&memory::PAGE_WRITABLE){flags&=~memory::PAGE_WRITABLE;memory::VirtualMemoryManager::set_page_flags(&parent->address_space,va,flags);}memory::PhysicalMemoryManager::retain_frame(phys);if(!memory::VirtualMemoryManager::map_page(&child->address_space,va,phys,flags))return -ERR_ENOMEM;}child->mappings[child->mapping_count++]={m.address,m.length,true};parent->mappings[i].cow=true;}
+    parent->children[parent->child_count++]=child; return child->pid;
+}
+
+int64_t Manager::exit(int32_t status) {
+    if (!current_process) return -ERR_EINVAL;
+    current_process->alive=false; current_process->exited=true; current_process->exit_status=status;
+    kernel::kprintf("[+] PID %d exited with status %d\n", current_process->pid,status); return 0;
+}
+
+int64_t Manager::wait4(pid_t pid, int32_t* status) {
+    if(!current_process)return -ERR_EINVAL;
+    for(uint32_t i=0;i<current_process->child_count;++i){Process*child=current_process->children[i];if(child&&child->exited&&(pid==-1||pid==child->pid)){if(status)*status=child->exit_status;pid_t result=child->pid;current_process->children[i]=current_process->children[--current_process->child_count];kfree(child);return result;}}
+    return -11;
+}
+
+bool Manager::handle_cow_fault(uintptr_t address) {
+    if(!current_process)return false; address&=~(memory::PAGE_SIZE-1);
+    for(uint32_t i=0;i<current_process->mapping_count;++i){Mapping&m=current_process->mappings[i];if(m.cow&&address>=m.address&&address<m.address+m.length){uintptr_t old=memory::VirtualMemoryManager::get_physical_address(&current_process->address_space,address),fresh=memory::PhysicalMemoryManager::alloc_frame();if(!old||!fresh)return false;auto*d=reinterpret_cast<uint8_t*>(fresh);auto*s=reinterpret_cast<const uint8_t*>(old);for(size_t j=0;j<memory::PAGE_SIZE;++j)d[j]=s[j];uint32_t flags=memory::VirtualMemoryManager::get_page_flags(&current_process->address_space,address);memory::VirtualMemoryManager::unmap_page(&current_process->address_space,address);if(!memory::VirtualMemoryManager::map_page(&current_process->address_space,address,fresh,flags|memory::PAGE_WRITABLE))return false;memory::PhysicalMemoryManager::free_frame(old);return true;}}
+    return false;
 }
 
 int64_t Manager::self_test() {

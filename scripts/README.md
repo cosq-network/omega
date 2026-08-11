@@ -31,7 +31,7 @@ the toolchain files in `cmake/` and target `x86_64`, `aarch64`, and `riscv64`.
 | `test_boot_framebuffer_unit.sh` | Host-side Multiboot framebuffer handoff parser unit tests | `build/boot-framebuffer-tests/` |
 | `test_storage.sh` | Storage unit tests, all-ISA boot tests, x86_64 transitional VirtIO-Block runtime completion, and AArch64/RISC-V VirtIO-Block builds | Build output and temporary QEMU logs |
 | `test_process.sh` | x86_64 process page-table creation and independent anonymous mapping test | `build/process-x86_64/` |
-| `build_user_init.sh` | Build the freestanding x86_64 static `/init` ELF artifact | `build/userland-x86_64/` |
+| `build_user_init.sh` | Build the freestanding static `/init` ELF for x86_64, AArch64, or RISC-V 64 | `build/userland-<arch>/` |
 | `create_initrd.py` | Pack a static userspace ELF into the Omega initrd format | Configured output path |
 | `test_userland.sh` | Build `/init`, pack an initrd, and verify x86_64 PT_LOAD mapping, Ring 3 entry, and `syscall` output in QEMU | `build/userland-x86_64/` |
 | `test_security.sh` | Linux UID/GID, supplementary-group, mode, and VFS permission tests | `build/security-tests/` |

@@ -11,6 +11,7 @@ class PhysicalMemoryManager {
 public:
     static void init(uintptr_t mem_start, size_t mem_size);
     static uintptr_t alloc_frame();
+    static void retain_frame(uintptr_t frame_addr);
     static void free_frame(uintptr_t frame_addr);
     static size_t get_free_frames();
     static size_t get_total_frames();
@@ -20,6 +21,8 @@ private:
     static size_t total_frames;
     static size_t free_frames;
     static size_t bitmap_size;
+    static uintptr_t frame_base;
+    static uint16_t refcounts[16384];
 
     static inline void set_bit(size_t bit) {
         bitmap[bit / 8] |= (1 << (bit % 8));

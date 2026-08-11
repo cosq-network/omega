@@ -38,25 +38,24 @@ namespace initrd {
 vfs::VfsNode* Initrd::init(uintptr_t location) {
     entries = nullptr;
     kernel::kprintf("[+] RAM Disk (Initrd) Initialized.\n");
-#if !defined(__x86_64__)
-    (void)location;
-    return vfs::VirtualFilesystem::get_root();
-#endif
     auto* header = reinterpret_cast<const InitrdHeader*>(location);
     auto valid_header = [](uintptr_t candidate) {
         const auto* candidate_header = reinterpret_cast<const InitrdHeader*>(candidate);
         if (candidate_header == nullptr || candidate_header->nfiles == 0 || candidate_header->nfiles > 128) return false;
         const auto* candidate_file = reinterpret_cast<const InitrdFileHeader*>(candidate + sizeof(InitrdHeader));
         return candidate_file->magic == 0xBF && candidate_file->offset >= sizeof(InitrdHeader) &&
-               candidate_file->length != 0 &&
+               candidate_file->offset < 0x02000000 && candidate_file->length != 0 &&
                reinterpret_cast<const uint8_t*>(candidate + candidate_file->offset)[0] == 0x7F;
     };
     if (!valid_header(location)) {
-#if defined(__x86_64__)
         // QEMU's direct-kernel initrd loader may choose a platform-dependent
         // low-RAM address. Search the reserved identity-mapped bring-up range
         // for the self-describing Omega header instead of trusting one ABI.
-        for (uintptr_t candidate = 0x600000; candidate < 0x04000000; candidate += 0x1000) {
+#if defined(__x86_64__)
+        constexpr uintptr_t scan_start = 0x600000ull, scan_end = 0x01000000ull;
+#endif
+#if defined(__x86_64__)
+        for (uintptr_t candidate = scan_start; candidate < scan_end; candidate += 0x1000) {
             if (valid_header(candidate)) { location = candidate; header = reinterpret_cast<const InitrdHeader*>(location); break; }
         }
 #endif

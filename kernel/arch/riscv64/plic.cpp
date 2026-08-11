@@ -3,6 +3,17 @@
 
 namespace hal {
 
+void timer_init(uint32_t frequency_hz) {
+    if (frequency_hz == 0) frequency_hz = 100;
+    uint64_t now;
+    asm volatile("rdtime %0" : "=r"(now));
+    const uint64_t interval = 10000000ull / frequency_hz;
+    register uint64_t a0 asm("a0") = now + interval;
+    register uint64_t a7 asm("a7") = 0; // SBI legacy set_timer
+    asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
+    kernel::kprintf("[+] RISC-V SBI timer initialized at %u Hz.\n", frequency_hz);
+}
+
 extern "C" void trap_entry();
 
 void interrupts_init() {

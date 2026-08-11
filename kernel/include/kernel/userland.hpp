@@ -9,11 +9,15 @@ class UserlandManager {
 public:
     static void init();
     static void init_x86_syscall_stack();
+    static void init_aarch64_exception_stack();
+    static void init_riscv_exception_stack();
     static void enter_userland(uintptr_t user_entry, uintptr_t user_stack);
 };
 
 } // namespace userland
 
 extern "C" void jump_to_userland(uintptr_t user_entry, uintptr_t user_stack);
+extern "C" void aarch64_enter_userland(uintptr_t user_entry, uintptr_t user_stack);
+extern "C" void riscv_enter_userland(uintptr_t user_entry, uintptr_t user_stack);
 
 #endif // OMEGA_KERNEL_USERLAND_HPP

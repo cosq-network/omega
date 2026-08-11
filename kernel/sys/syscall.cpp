@@ -87,7 +87,7 @@ int64_t SyscallDispatcher::dispatch6(uint64_t sys_num, uint64_t arg1, uint64_t a
         }
         case SYS_EXIT:
             kernel::kprintf("[!] Syscall Exit Called with status: %d\n", arg1);
-            return 0;
+            return process::Manager::exit(static_cast<int32_t>(arg1));
         case SYS_OPEN:
         case SYS_OPENAT: {
             const uintptr_t user_path = sys_num == SYS_OPENAT ? arg2 : arg1;
@@ -144,7 +144,8 @@ int64_t SyscallDispatcher::dispatch6(uint64_t sys_num, uint64_t arg1, uint64_t a
         case SYS_BRK:
             return process::Manager::brk(static_cast<uintptr_t>(arg1));
         case SYS_WAIT4:
-            return -38; // Process reaping is not implemented before fork/COW.
+            return process::Manager::wait4(static_cast<process::pid_t>(arg1),
+                                           reinterpret_cast<int32_t*>(arg3));
         case SYS_GETUID: return security::Manager::current().uid;
         case SYS_GETEUID: return security::Manager::current().euid;
         case SYS_GETGID: return security::Manager::current().gid;

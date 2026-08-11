@@ -46,8 +46,52 @@ extern "C" void x86_page_fault(void* raw_frame) {
     auto* words = reinterpret_cast<const uint64_t*>(raw_frame);
     const uint64_t error = words != nullptr ? words[15] : 0;
     const uint64_t rip = words != nullptr ? words[16] : 0;
+    if ((error & 2) && process::Manager::handle_cow_fault(fault_address)) return;
     kernel::kprintf("[PANIC] x86 page fault addr=%x error=%x rip=%x\n",
                     fault_address, error, rip);
+}
+#endif
+
+#if defined(__aarch64__) || defined(__riscv)
+namespace {
+alignas(16) static uint8_t exception_stack[16 * 1024];
+}
+#endif
+
+#if defined(__aarch64__)
+extern "C" void aarch64_prepare_exception_stack(uintptr_t);
+extern "C" uintptr_t aarch64_exception_handler(uintptr_t* frame) {
+    uint64_t esr; asm volatile("mrs %0, esr_el1" : "=r"(esr));
+    const uint32_t ec = static_cast<uint32_t>(esr >> 26);
+    if (ec == 0x15) {
+        frame[0] = static_cast<uint64_t>(syscall::SyscallDispatcher::dispatch6(
+            frame[8], frame[0], frame[1], frame[2], frame[3], frame[4], frame[5]));
+        uint64_t pc; asm volatile("mrs %0, elr_el1" : "=r"(pc));
+        asm volatile("msr elr_el1, %0" : : "r"(pc + 4) : "memory");
+    } else if (ec == 0x20 || ec == 0x21 || ec == 0x24 || ec == 0x25) {
+        uint64_t far; asm volatile("mrs %0, far_el1" : "=r"(far));
+        kernel::kprintf("[!] AArch64 EL0 %s fault at %x (ESR %x)\n",
+                        (ec == 0x20 || ec == 0x21) ? "instruction" : "data", far, esr);
+    } else {
+        kernel::kprintf("[!] AArch64 unexpected EL0 exception (ESR %x)\n", esr);
+    }
+    return 0;
+}
+#elif defined(__riscv)
+extern "C" void riscv_prepare_exception_stack(uintptr_t);
+extern "C" uintptr_t riscv_exception_handler(uintptr_t* frame) {
+    const uint64_t cause = frame[33];
+    if (cause == 8) {
+        frame[10] = static_cast<uint64_t>(syscall::SyscallDispatcher::dispatch6(
+            frame[17], frame[10], frame[11], frame[12], frame[13], frame[14], frame[15]));
+        frame[32] += 4;
+    } else if (cause == 12 || cause == 13 || cause == 15) {
+        kernel::kprintf("[!] RISC-V U-mode %s page fault at %x\n",
+                        cause == 12 ? "instruction" : cause == 13 ? "load" : "store", frame[34]);
+    } else {
+        kernel::kprintf("[!] RISC-V unexpected user trap cause %u\n", cause);
+    }
+    return 0;
 }
 #endif
 
@@ -71,10 +115,28 @@ void UserlandManager::init() {
     kernel::kprintf("[+] Userland Mode Manager (Ring 3 / EL0) Initialized.\n");
 }
 
+void UserlandManager::init_aarch64_exception_stack() {
+#if defined(__aarch64__)
+    aarch64_prepare_exception_stack(reinterpret_cast<uintptr_t>(exception_stack) + sizeof(exception_stack));
+#endif
+}
+
+void UserlandManager::init_riscv_exception_stack() {
+#if defined(__riscv)
+    riscv_prepare_exception_stack(reinterpret_cast<uintptr_t>(exception_stack) + sizeof(exception_stack));
+#endif
+}
+
 void UserlandManager::enter_userland(uintptr_t user_entry, uintptr_t user_stack) {
 #if defined(__x86_64__)
     kernel::kprintf("[+] Entering x86_64 Ring 3 init (Entry: %x, Stack: %x)\n", user_entry, user_stack);
     x86_enter_userland(user_entry, user_stack);
+#elif defined(__aarch64__)
+    kernel::kprintf("[+] Entering AArch64 EL0 init (Entry: %x, Stack: %x)\n", user_entry, user_stack);
+    aarch64_enter_userland(user_entry, user_stack);
+#elif defined(__riscv)
+    kernel::kprintf("[+] Entering RISC-V U-mode init (Entry: %x, Stack: %x)\n", user_entry, user_stack);
+    riscv_enter_userland(user_entry, user_stack);
 #else
     (void)user_entry;
     (void)user_stack;

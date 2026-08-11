@@ -12,6 +12,7 @@ _start:
 
     /* Set up Stack Pointer */
     la sp, stack_top
+    csrw sscratch, sp
 
     /* OpenSBI passes hartid in a0 and the FDT address in a1. */
     mv s0, a1
