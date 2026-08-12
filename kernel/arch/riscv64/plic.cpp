@@ -11,7 +11,16 @@ void timer_init(uint32_t frequency_hz) {
     register uint64_t a0 asm("a0") = now + interval;
     register uint64_t a7 asm("a7") = 0; // SBI legacy set_timer
     asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
+    asm volatile("csrs sie, %0" : : "r"(static_cast<uint64_t>(1ull << 5)) : "memory");
     kernel::kprintf("[+] RISC-V SBI timer initialized at %u Hz.\n", frequency_hz);
+}
+
+extern "C" void riscv_timer_interrupt() {
+    uint64_t now;
+    asm volatile("rdtime %0" : "=r"(now));
+    register uint64_t a0 asm("a0") = now + 100000ull;
+    register uint64_t a7 asm("a7") = 0;
+    asm volatile("ecall" : "+r"(a0) : "r"(a7) : "memory");
 }
 
 extern "C" void trap_entry();

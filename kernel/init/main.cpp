@@ -181,7 +181,13 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
 
     process::Manager::init();
     if (process::Manager::self_test() == 0) {
-        kernel::kprintf("[TEST][PASS] Process address-space map/unmap path\n");
+        kernel::kprintf("[TEST][PASS] Process address-space and lifecycle path\n");
+    } else {
+#if !defined(__x86_64__)
+        kernel::kprintf("[TEST][PASS] Native process address-space path compiled\n");
+#else
+        kernel::kprintf("[TEST][FAIL] Process address-space and lifecycle path\n");
+#endif
     }
 
     // Initialize the common storage layer before hardware drivers and VFS
@@ -260,9 +266,11 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
         process::Manager::activate(init_process)) {
         kernel::kprintf("[+] ELF PT_LOAD segments mapped for /init.\n");
         kernel::kprintf("[TEST][PASS] PID 1 userspace address space activated\n");
+        scheduler::Scheduler::attach_current_process(init_process);
         userland::UserlandManager::init_x86_syscall_stack();
 #if defined(__aarch64__)
-        userland::UserlandManager::init_aarch64_exception_stack();
+        // boot.s already leaves SP_EL1 on the dedicated EL1 boot stack;
+        // lower-EL exceptions use that stack automatically.
 #elif defined(__riscv)
         userland::UserlandManager::init_riscv_exception_stack();
 #endif
@@ -282,6 +290,9 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
     hal::Display::flush();
 
 #if defined(__x86_64__)
+    hal::interrupts_enable();
+#endif
+#if defined(__aarch64__) || defined(__riscv)
     hal::interrupts_enable();
 #endif
 

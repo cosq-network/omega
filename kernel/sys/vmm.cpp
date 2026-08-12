@@ -7,12 +7,6 @@ namespace memory {
 uintptr_t VirtualMemoryManager::current_pml4_or_ttbr = 0;
 
 namespace {
-#if !defined(__x86_64__)
-static constexpr uintptr_t ADDRESS_LIMIT = 0x20000000000ull;
-#endif
-#if defined(__aarch64__)
-static constexpr uintptr_t BLOCK_SIZE = 0x200000ull;
-#endif
 
 #if defined(__aarch64__)
 alignas(4096) static uint64_t arm_l0[512];
@@ -36,13 +30,11 @@ static uint64_t arm_attrs(uint32_t flags) {
 static void arm_setup() {
     for (uint32_t i = 0; i < 512; ++i) arm_l0[i] = 0;
     arm_l0[0] = reinterpret_cast<uintptr_t>(&arm_l1[0][0]) | ARM_VALID | ARM_TABLE;
-    // Keep the low 1 GiB identity mapped for the kernel and leave the rest
-    // of the user VA space available for per-process 4 KiB mappings.
-    for (uint32_t block = 0; block < 1; ++block) {
-        const uintptr_t phys = static_cast<uintptr_t>(block) * BLOCK_SIZE * 512;
-        arm_l1[0][block] = phys | arm_attrs(PAGE_PRESENT | PAGE_WRITABLE | PAGE_EXEC);
-    }
-    for (uint32_t block = 1; block < 512; ++block) arm_l1[0][block] = 0;
+    // Preserve the low identity window and the QEMU virt kernel window. The
+    // latter is linked at 0x40080000, so it needs the 0x40000000 L1 entry.
+    arm_l1[0][0] = arm_attrs(PAGE_PRESENT | PAGE_WRITABLE | PAGE_EXEC);
+    arm_l1[0][1] = 0x40000000ull | arm_attrs(PAGE_PRESENT | PAGE_WRITABLE | PAGE_EXEC);
+    for (uint32_t block = 2; block < 512; ++block) arm_l1[0][block] = 0;
 }
 #endif
 
@@ -52,6 +44,7 @@ static constexpr uint64_t RV_V = 1ull;
 static constexpr uint64_t RV_R = 1ull << 1;
 static constexpr uint64_t RV_W = 1ull << 2;
 static constexpr uint64_t RV_X = 1ull << 3;
+static constexpr uint64_t RV_U = 1ull << 4;
 static constexpr uint64_t RV_A = 1ull << 6;
 static constexpr uint64_t RV_D = 1ull << 7;
 
@@ -59,6 +52,7 @@ static uint64_t rv_flags(uint32_t flags) {
     uint64_t pte = RV_V | RV_R | RV_A | RV_D;
     if (flags & PAGE_WRITABLE) pte |= RV_W;
     if (flags & PAGE_EXEC) pte |= RV_X;
+    if (flags & PAGE_USER) pte |= RV_U;
     return pte;
 }
 
@@ -69,12 +63,6 @@ static void rv_setup() {
     // user mappings.
     rv_root[0] = rv_flags(PAGE_PRESENT | PAGE_WRITABLE | PAGE_EXEC);
     rv_root[2] = (0x80000000ull >> 12) << 10 | rv_flags(PAGE_PRESENT | PAGE_WRITABLE | PAGE_EXEC);
-}
-#endif
-
-#if !defined(__x86_64__)
-static bool in_identity_window(uintptr_t address) {
-    return address < ADDRESS_LIMIT;
 }
 #endif
 
@@ -135,7 +123,7 @@ static uintptr_t arm_alloc_table() {
 
 static uint64_t arm_table_desc(uintptr_t address) { return address | ARM_VALID | ARM_TABLE; }
 static uint64_t arm_leaf_attrs(uint32_t flags) {
-    uint64_t attrs = arm_attrs(flags);
+    uint64_t attrs = arm_attrs(flags) | ARM_TABLE;
     // AP=01: EL0 read/write; AP=11: EL0 read-only.
     attrs &= ~(3ull << 6);
     attrs |= (flags & PAGE_WRITABLE) ? (1ull << 6) : (3ull << 6);
@@ -160,6 +148,12 @@ void VirtualMemoryManager::init() {
     asm volatile("mov %%cr3, %0" : "=r"(current_pml4_or_ttbr));
 #elif defined(__aarch64__)
     arm_setup();
+    // Use the 4 KiB-granule, 39-bit TTBR0 regime used by the per-process
+    // L0/L1/L2/L3 tables below. Normal memory is cacheable; device mappings
+    // use the second MAIR attribute.
+    const uint64_t mair = 0x00000000000004ffull;
+    const uint64_t tcr = 16ull | (1ull << 8) | (1ull << 10) | (3ull << 12);
+    asm volatile("msr mair_el1, %0; msr tcr_el1, %1; dsb sy; isb" : : "r"(mair), "r"(tcr) : "memory");
     asm volatile("mrs %0, ttbr0_el1" : "=r"(current_pml4_or_ttbr));
 #elif defined(__riscv)
     rv_setup();
@@ -333,7 +327,11 @@ bool VirtualMemoryManager::map_page(AddressSpace* space, uintptr_t virt_addr,
     if (!(l2[i2] & ARM_TABLE)) return false;
     l3 = reinterpret_cast<uint64_t*>(l2[i2] & ~0x3ull);
     if (l3[i3] & ARM_VALID) return false;
-    l3[i3] = phys_addr | arm_leaf_attrs(flags); return true;
+    l3[i3] = phys_addr | arm_leaf_attrs(flags);
+    if (space->root == current_pml4_or_ttbr) {
+        asm volatile("dsb ish; tlbi vae1is, %0; dsb ish; isb" : : "r"(virt_addr >> 12) : "memory");
+    }
+    return true;
 #elif defined(__riscv)
     if (!space || !space->valid || !(flags & PAGE_PRESENT) || phys_addr == 0) return false;
     virt_addr &= ~(PAGE_SIZE - 1); phys_addr &= ~(PAGE_SIZE - 1);
@@ -346,7 +344,9 @@ bool VirtualMemoryManager::map_page(AddressSpace* space, uintptr_t virt_addr,
     if (!(l1[i1] & RV_V)) { const uintptr_t p = rv_alloc_table(); if (!p) return false; l1[i1] = rv_table_desc(p); }
     auto* l0 = reinterpret_cast<uint64_t*>((l1[i1] >> 10) << 12);
     if (l0[i0] & RV_V) return false;
-    l0[i0] = (phys_addr >> 12) << 10 | rv_flags(flags); return true;
+    l0[i0] = (phys_addr >> 12) << 10 | rv_flags(flags);
+    asm volatile("sfence.vma %0" : : "r"(virt_addr) : "memory");
+    return true;
 #else
     (void)space; (void)virt_addr; (void)phys_addr; (void)flags; return false;
 #endif
@@ -455,7 +455,21 @@ bool VirtualMemoryManager::activate(const AddressSpace* space) {
     return true;
 #else
 #if defined(__aarch64__)
-    if (!space || !space->valid) return false; current_pml4_or_ttbr=space->root; asm volatile("msr ttbr0_el1, %0; dsb ish; isb" : : "r"(space->root) : "memory"); return true;
+    if (!space || !space->valid) return false;
+    current_pml4_or_ttbr = space->root;
+    asm volatile(
+        "msr ttbr0_el1, %0\n"
+        "dsb ish\n"
+        "tlbi vmalle1\n"
+        "dsb ish\n"
+        "isb\n"
+        "mrs x0, sctlr_el1\n"
+        "mov x1, #0x1005\n"
+        "orr x0, x0, x1\n"
+        "msr sctlr_el1, x0\n"
+        "isb\n"
+        : : "r"(space->root) : "x0", "x1", "memory");
+    return true;
 #elif defined(__riscv)
     if (!space || !space->valid) return false; current_pml4_or_ttbr=(8ull<<60)|(space->root>>12); asm volatile("csrw satp, %0; sfence.vma" : : "r"(current_pml4_or_ttbr) : "memory"); return true;
 #else

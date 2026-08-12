@@ -2,6 +2,12 @@
 #include "kernel/kprint.hpp"
 #include "kernel/syscall.hpp"
 #include "kernel/process.hpp"
+#include "kernel/scheduler.hpp"
+
+namespace hal {
+extern "C" void aarch64_timer_interrupt();
+extern "C" void riscv_timer_interrupt();
+}
 
 #if defined(__x86_64__)
 extern "C" void x86_enter_userland(uintptr_t user_entry, uintptr_t user_stack);
@@ -73,7 +79,8 @@ extern "C" uintptr_t aarch64_exception_handler(uintptr_t* frame) {
         kernel::kprintf("[!] AArch64 EL0 %s fault at %x (ESR %x)\n",
                         (ec == 0x20 || ec == 0x21) ? "instruction" : "data", far, esr);
     } else {
-        kernel::kprintf("[!] AArch64 unexpected EL0 exception (ESR %x)\n", esr);
+        (void)scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
+        hal::aarch64_timer_interrupt();
     }
     return 0;
 }
@@ -81,13 +88,16 @@ extern "C" uintptr_t aarch64_exception_handler(uintptr_t* frame) {
 extern "C" void riscv_prepare_exception_stack(uintptr_t);
 extern "C" uintptr_t riscv_exception_handler(uintptr_t* frame) {
     const uint64_t cause = frame[33];
-    if (cause == 8) {
+    if ((cause >> 63) != 0 && (cause & 0xfff) == 5) {
+        (void)scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
+        hal::riscv_timer_interrupt();
+    } else if (cause == 8) {
         frame[10] = static_cast<uint64_t>(syscall::SyscallDispatcher::dispatch6(
             frame[17], frame[10], frame[11], frame[12], frame[13], frame[14], frame[15]));
         frame[32] += 4;
     } else if (cause == 12 || cause == 13 || cause == 15) {
-        kernel::kprintf("[!] RISC-V U-mode %s page fault at %x\n",
-                        cause == 12 ? "instruction" : cause == 13 ? "load" : "store", frame[34]);
+        kernel::kprintf("[!] RISC-V U-mode %s page fault at %x pc=%x\n",
+                        cause == 12 ? "instruction" : cause == 13 ? "load" : "store", frame[34], frame[32]);
     } else {
         kernel::kprintf("[!] RISC-V unexpected user trap cause %u\n", cause);
     }

@@ -132,10 +132,15 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
         if (ph->p_flags & PF_W) flags |= memory::PAGE_WRITABLE;
         if (ph->p_flags & PF_X) flags |= memory::PAGE_EXEC;
         for (uintptr_t address = first; address < last; address += memory::PAGE_SIZE) {
-            const uintptr_t frame = memory::PhysicalMemoryManager::alloc_frame();
-            if (frame == 0 || !memory::VirtualMemoryManager::map_page(&process->address_space, address, frame, flags)) return false;
+            uintptr_t frame = memory::VirtualMemoryManager::get_physical_address(&process->address_space, address);
+            const bool new_page = frame == 0;
+            if (new_page) frame = memory::PhysicalMemoryManager::alloc_frame();
+            if (frame == 0 || (new_page && !memory::VirtualMemoryManager::map_page(&process->address_space, address, frame, flags))) {
+                kernel::kprintf("[!] ELF map failed at %x\n", address);
+                return false;
+            }
             auto* destination = reinterpret_cast<uint8_t*>(frame);
-            for (size_t j = 0; j < memory::PAGE_SIZE; ++j) destination[j] = 0;
+            if (new_page) for (size_t j = 0; j < memory::PAGE_SIZE; ++j) destination[j] = 0;
             const uint64_t page_start = address;
             const uint64_t page_end = address + memory::PAGE_SIZE;
             const uint64_t file_start = ph->p_vaddr;
@@ -144,8 +149,12 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
             const uint64_t copy_end = page_end < file_end ? page_end : file_end;
             for (uint64_t cursor = copy_start; cursor < copy_end; ++cursor)
                 destination[cursor - page_start] = elf_data[ph->p_offset + cursor - ph->p_vaddr];
-            if (process->mapping_count >= 32) return false;
-            process->mappings[process->mapping_count++] = {address, memory::PAGE_SIZE, false};
+            if (new_page) {
+#if defined(__x86_64__)
+                if (process->mapping_count >= 32) return false;
+                process->mappings[process->mapping_count++] = {address, memory::PAGE_SIZE, false};
+#endif
+            }
         }
     }
 
@@ -159,15 +168,22 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
     constexpr uintptr_t stack_page = stack_top - memory::PAGE_SIZE;
     const uintptr_t frame = memory::PhysicalMemoryManager::alloc_frame();
     if (frame == 0 || !memory::VirtualMemoryManager::map_page(&process->address_space, stack_page, frame,
-                                                               memory::PAGE_PRESENT | memory::PAGE_USER | memory::PAGE_WRITABLE)) return false;
+                                                               memory::PAGE_PRESENT | memory::PAGE_USER | memory::PAGE_WRITABLE)) {
+        kernel::kprintf("[!] ELF stack map failed at %x\n", stack_page);
+        return false;
+    }
     auto* stack_memory = reinterpret_cast<uint8_t*>(frame);
     for (size_t i = 0; i < memory::PAGE_SIZE; ++i) stack_memory[i] = 0;
+#if defined(__x86_64__)
     if (process->mapping_count >= 32) return false;
     process->mappings[process->mapping_count++] = {stack_page, memory::PAGE_SIZE, false};
+#endif
     *entry = static_cast<uintptr_t>(header->e_entry);
     *stack = stack_top - 16;
+#if defined(__x86_64__)
     process->user_entry = *entry;
     process->user_stack = *stack;
+#endif
     return true;
 }
 

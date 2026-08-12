@@ -59,9 +59,14 @@ static bool overlaps(const Process* process, uintptr_t address, size_t length) {
 }
 
 static bool add_mapping(Process* process, uintptr_t address, size_t length) {
+#if !defined(__x86_64__)
+    (void)process; (void)address; (void)length;
+    return true;
+#else
     if (process->mapping_count >= 32) return false;
     process->mappings[process->mapping_count++] = {address, length, false};
     return true;
+#endif
 }
 }
 
@@ -204,7 +209,9 @@ bool Manager::handle_cow_fault(uintptr_t address) {
 }
 
 int64_t Manager::self_test() {
-#if defined(__x86_64__)
+#if !defined(__x86_64__)
+    return -ERR_ENOSYS;
+#else
     if (current_process == nullptr) return -ERR_ENOMEM;
     Process* first_process = current_process;
     const int64_t first = mmap(0, memory::PAGE_SIZE, PROT_READ | PROT_WRITE, 0x22, -1, 0);
@@ -228,9 +235,27 @@ int64_t Manager::self_test() {
         return -ERR_EINVAL;
     }
     kernel::kprintf("[TEST][PASS] Isolated process address-space map/unmap\n");
+    const int64_t cow_address = mmap(0, memory::PAGE_SIZE, PROT_READ | PROT_WRITE, 0x22, -1, 0);
+    if (cow_address < 0) return cow_address;
+    const uintptr_t original = memory::VirtualMemoryManager::get_physical_address(
+        &first_process->address_space, static_cast<uintptr_t>(cow_address));
+    const int64_t child_pid = fork();
+    if (child_pid < 0 || first_process->child_count == 0) return -ERR_ENOMEM;
+    Process* child = first_process->children[first_process->child_count - 1];
+    if (memory::VirtualMemoryManager::get_physical_address(&child->address_space,
+            static_cast<uintptr_t>(cow_address)) != original ||
+        !handle_cow_fault(static_cast<uintptr_t>(cow_address))) return -ERR_EINVAL;
+    const uintptr_t private_copy = memory::VirtualMemoryManager::get_physical_address(
+        &first_process->address_space, static_cast<uintptr_t>(cow_address));
+    if (private_copy == 0 || private_copy == original) return -ERR_EINVAL;
+    if (!activate(child) || munmap(static_cast<uintptr_t>(cow_address), memory::PAGE_SIZE) != 0) return -ERR_EINVAL;
+    (void)exit(17);
+    if (!activate(first_process)) return -ERR_EINVAL;
+    int32_t status = 0;
+    if (wait4(child_pid, &status) != child_pid || status != 17 ||
+        munmap(static_cast<uintptr_t>(cow_address), memory::PAGE_SIZE) != 0) return -ERR_EINVAL;
+    kernel::kprintf("[TEST][PASS] COW fork, write fault, exit, and wait/reap\n");
     return 0;
-#else
-    return -ERR_ENOSYS;
 #endif
 }
 

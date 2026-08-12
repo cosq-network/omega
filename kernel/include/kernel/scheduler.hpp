@@ -3,6 +3,7 @@
 
 #include "std/cstdint.hpp"
 
+namespace process { struct Process; }
 namespace scheduler {
 
 enum ThreadState {
@@ -25,6 +26,7 @@ struct Thread {
     void (*entry_point)();
     Thread* next;
     uint64_t switches;
+    process::Process* process;
 };
 
 class Scheduler {
@@ -39,6 +41,7 @@ public:
     static void run_current();
     [[noreturn]] static void thread_exit();
     static uint64_t tick_count();
+    static void attach_current_process(process::Process* process);
 
 private:
     static Thread* current_thread;

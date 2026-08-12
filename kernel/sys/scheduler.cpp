@@ -1,6 +1,7 @@
 #include "kernel/scheduler.hpp"
 #include "kernel/heap.hpp"
 #include "kernel/kprint.hpp"
+#include "kernel/process.hpp"
 
 namespace scheduler {
 
@@ -33,6 +34,7 @@ void Scheduler::init() {
     current_thread->entry_point = nullptr;
     current_thread->next = current_thread; // Circular list
     current_thread->switches = 0;
+    current_thread->process = nullptr;
 
     thread_list_head = current_thread;
 
@@ -46,6 +48,7 @@ Thread* Scheduler::create_thread(void (*entry)()) {
     new_thread->state = READY;
     new_thread->entry_point = entry;
     new_thread->switches = 0;
+    new_thread->process = nullptr;
 
     // Allocate 16 KiB Thread Stack
     uintptr_t stack = reinterpret_cast<uintptr_t>(kmalloc(STACK_SIZE)) + STACK_SIZE;
@@ -128,14 +131,21 @@ void Scheduler::wake(Thread* thread) {
 
 uintptr_t Scheduler::timer_tick(uintptr_t saved_stack) {
     ++timer_ticks;
-#if defined(__x86_64__)
     if (current_thread == nullptr) return saved_stack;
     current_thread->stack_ptr = saved_stack;
     Thread* old = current_thread;
     schedule();
-    if (old != current_thread) return current_thread->stack_ptr;
-#endif
+    if (old != current_thread) {
+        if (current_thread->process != nullptr) {
+            (void)process::Manager::activate(current_thread->process);
+        }
+        return current_thread->stack_ptr;
+    }
     return saved_stack;
+}
+
+void Scheduler::attach_current_process(process::Process* process) {
+    if (current_thread != nullptr) current_thread->process = process;
 }
 
 void Scheduler::run_current() {
