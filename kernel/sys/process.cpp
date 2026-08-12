@@ -27,7 +27,9 @@ constexpr uint32_t PROT_READ = 1;
 constexpr uint32_t MAP_FIXED = 0x10;
 constexpr int64_t ERR_EINVAL = 22;
 constexpr int64_t ERR_ENOMEM = 12;
+#if !defined(__x86_64__)
 constexpr int64_t ERR_ENOSYS = 38;
+#endif
 constexpr int64_t ERR_EEXIST = 17;
 
 Process* current_process = nullptr;

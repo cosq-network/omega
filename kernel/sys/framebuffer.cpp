@@ -64,6 +64,52 @@ void fill_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
     }
 }
 
+void draw_omega_logo() {
+    if (!framebuffer_active() || active_fb == nullptr) return;
+    const uint32_t size = active_fb->width < active_fb->height ? active_fb->width : active_fb->height;
+    const uint32_t cx = active_fb->width / 2;
+    const int32_t cy = static_cast<int32_t>(active_fb->height / 2);
+    const int32_t outer = static_cast<int32_t>(size * 34 / 100);
+    const int32_t inner = outer - static_cast<int32_t>(size * 7 / 100);
+    const int32_t base_y = cy + static_cast<int32_t>(size * 27 / 100);
+    const int32_t bar_h = static_cast<int32_t>(size * 7 / 100);
+    const uint32_t navy = 0x081B58;
+    const uint32_t cyan = 0x10C9F4;
+
+    for (int32_t y = cy - outer; y <= cy + outer / 2; ++y) {
+        for (int32_t x = static_cast<int32_t>(cx) - outer; x <= static_cast<int32_t>(cx) + outer; ++x) {
+            const int32_t dx = x - static_cast<int32_t>(cx);
+            const int32_t dy = y - static_cast<int32_t>(cy);
+            const int32_t distance = dx * dx + dy * dy;
+            if (distance <= outer * outer && distance >= inner * inner)
+                put_pixel(static_cast<uint32_t>(x), static_cast<uint32_t>(y), navy);
+        }
+    }
+
+    for (int32_t y = cy; y <= base_y; ++y) {
+        const int32_t rise = y - cy;
+        const int32_t spread = outer - rise * outer / (base_y - cy + 1);
+        const int32_t edge = inner - rise * inner / (base_y - cy + 1);
+        for (int32_t x = static_cast<int32_t>(cx) - outer; x <= static_cast<int32_t>(cx) + outer; ++x) {
+            const int32_t dx = x - static_cast<int32_t>(cx);
+            if (dx >= -spread && dx <= spread && (dx <= -edge || dx >= edge))
+                put_pixel(static_cast<uint32_t>(x), static_cast<uint32_t>(y), navy);
+        }
+    }
+    fill_rect(cx - outer - size / 15, base_y, outer * 2 / 3, bar_h, navy);
+    fill_rect(cx + outer - outer * 2 / 3 + size / 15, base_y, outer * 2 / 3, bar_h, navy);
+
+    const int32_t stem = static_cast<int32_t>(size * 4 / 100);
+    for (int32_t y = cy + size / 15; y <= base_y + bar_h; ++y) {
+        const int32_t d = y - (cy + size / 15);
+        const int32_t wing = d * size / 45;
+        for (int32_t x = -stem; x <= stem; ++x) {
+            put_pixel(static_cast<uint32_t>(static_cast<int32_t>(cx) - size / 18 - wing / 3 + x), static_cast<uint32_t>(y), cyan);
+            put_pixel(static_cast<uint32_t>(static_cast<int32_t>(cx) + size / 18 + wing / 3 + x), static_cast<uint32_t>(y), cyan);
+        }
+    }
+}
+
 bool framebuffer_self_test() {
     if (!framebuffer_active()) {
         return false;

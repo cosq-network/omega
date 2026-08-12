@@ -276,6 +276,11 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
 
     kernel::kprintf("[+] System online. Entering idle loop...\n");
 
+    // Leave the completed boot screen branded with the Omega mark. The
+    // framebuffer path is optional; serial and text-mode boots are unchanged.
+    display::draw_omega_logo();
+    hal::Display::flush();
+
 #if defined(__x86_64__)
     hal::interrupts_enable();
 #endif
