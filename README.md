@@ -1,8 +1,14 @@
 # Omega Kernel
 
+<p align="center">
+  <img src="assets/branding/omega-logo-hd.png" alt="Omega operating system logo" width="280">
+</p>
+
+<p align="center">A cross-architecture operating-system kernel for x86_64, AArch64, and RISC-V 64.</p>
+
 ## Overview
 
-**Omega** is a lightweight, high-performance kernel core with an explicit Omega ABI boundary, designed to cross-compile using Clang and LLVM (`ld.lld`) for **x86_64** (x64), **AArch64** (ARM64), and **RISC-V 64 (`rv64gc`)** target architectures.
+**Omega** is a lightweight, high-performance operating-system kernel with an explicit ABI boundary, native userspace entry paths, and a QEMU-based verification workflow. It cross-compiles using Clang and LLVM (`ld.lld`) for **x86_64** (x64), **AArch64** (ARM64), and **RISC-V 64 (`rv64gc`)**.
 
 ---
 
@@ -11,12 +17,15 @@
 - [Overview](#overview)
 - [Key Features](#key-features)
 - [Technical Implementation](#technical-implementation)
+- [Documentation](#documentation)
 - [Repository Structure](#repository-structure)
 - [Building and Running](#building-and-running)
 - [Automated Tests](#automated-tests)
 - [License](#license)
 
 ## Key Features
+
+### Kernel and architecture support
 
 - **Clang/LLVM Cross-Compilation**: Built using `clang++`, `ld.lld`, and CMake toolchain integration without external GCC cross-compiler dependencies.
 - **Triple Architecture Support**:
@@ -35,6 +44,7 @@
 - **Linux-Compatible Users, Groups & Permissions**: Real/effective/saved filesystem IDs, supplementary groups, root DAC behavior, `chmod`/`chown`, `setuid`/`setgid`, `setgroups`, `umask`, and shared permission semantics on all three ISAs.
 - **Process Address Spaces**: Per-process roots with user mappings on x86_64, AArch64, and Sv39 RISC-V; permission-bearing ELF PT_LOAD mapping, retained physical frames, and native init activation on all three ISAs. x86_64 additionally has the verified COW fork/fault, exit, and wait/reap lifecycle.
 - **x86_64 Userspace Bootstrap**: Initrd-backed static `/init`, ELF `PT_LOAD` segment mapping, user stack creation, Ring 3 `iretq` entry, TSS-backed kernel stack, page-fault entry, and native `syscall`/`sysretq` return. Verify with [`scripts/test_userland.sh`](scripts/test_userland.sh).
+- **Cross-Architecture Userspace Bootstrap**: AArch64 EL0 and RISC-V U-mode `/init` programs with native exception entry, syscall dispatch, fault reporting, timer setup, and `eret`/`sret` return paths. Verify with [`scripts/test_native_userland.sh`](scripts/test_native_userland.sh).
 - **Userland Mode Manager**: Real x86_64 Ring 3, AArch64 EL0, and RISC-V U-mode entry, with lower-privilege syscall/fault vectors and architecture-specific timer setup.
 - **ELF 64-bit Executable Loader**: Bounded matching-ISA validation plus x86_64 static `ET_EXEC` `PT_LOAD` mapping and execution; relocations, dynamic linking, and broader process lifecycle remain pending.
 - **Linux ELF Artifact Boundary**: Validates matching-ISA ELF64 `ET_EXEC`/static `ET_DYN` program headers; static archives are link-time inputs, while dynamic `.so` execution remains gated on Omega's future dynamic linker.
@@ -49,6 +59,26 @@
 - **Omega Virtual Device (OVD) Manager & GUI**: Android-like multi-architecture device manager with schema validation, predefined real-device profiles, ext4 artifact/digest checks, safe process lifecycle commands, daemon logs/QMP state, snapshots, import/export, networking/initrd/ephemeral profiles, selectable storage transports, a styled VirtualBox-inspired Tkinter manager, and an integrated resilient VNC viewer with keyboard, mouse, framebuffer, and clipboard support.
 - **OVD Real-Device Profile Catalog**: Versioned x86_64, AArch64, and RISC-V profile definitions with deterministic validation/rendering, ext4-default native artifact policy, and explicit external-adapter classification.
 - **Containerization & CI/CD**: Minimal Alpine-based `Dockerfile`, VSCode DevContainers/Codespaces (`.devcontainer/devcontainer.json`), and GitHub Actions CI/CD (`.github/workflows/ci.yml`).
+
+### Feature status
+
+The native `/init` path is complete on all three reference platforms. x86_64 additionally has the verified copy-on-write fork, write-fault, exit, and wait/reap lifecycle. Extending COW lifecycle handling and scheduler-driven process switching to AArch64 and RISC-V remains planned.
+
+### Implemented subsystem groups
+
+| Area | Current implementation |
+| :--- | :--- |
+| Boot and architecture | x86_64 long mode, AArch64 EL2 to EL1, RISC-V S-mode through OpenSBI |
+| Memory | Bitmap PMM, dynamic heap, x86_64 page tables, AArch64 TTBR0 mappings, RISC-V Sv39 mappings |
+| Userspace | Initrd-backed ELF `/init`, native Ring 3, EL0, and U-mode entry, syscall return paths on all three ISAs |
+| Processes | Per-process roots and user mappings on all ISAs; x86_64 COW lifecycle verification |
+| Security | Linux-style credentials, groups, ownership, mode checks, DAC rules, and umask foundations |
+| Filesystems | VFS node tree and initrd RAM disk with permission-aware access checks |
+| Storage | Common block API, DMA abstraction, GPT/MBR parsing, synthetic backend, experimental VirtIO-Block |
+| Networking | VirtIO-Net, Ethernet, IPv4, UDP, and TCP foundations |
+| Input | Versioned input ABI, keyboard and mouse events, HID boot reports, PS/2 backend, portable adapters |
+| Display | x86_64 VGA and Bochs VBE, SimpleFb on AArch64 and RISC-V, serial fallback, Omega boot logo |
+| Development tools | Boot image generator, OVD manager and GUI, QEMU launchers, unit and integration tests |
 
 ---
 
@@ -75,11 +105,13 @@
 
 **AArch64 / RISC-V:** Shared FDT parsing, framebuffer fallback, native lower-privilege entry/traps, per-process TTBR0/Sv39 roots, ELF `/init`, and timer setup are implemented. VirtIO-GPU, SMP, and production interrupt-controller support remain planned.
 
-**Userspace (x86_64 reference slice):** A freestanding static `/init` is built,
+**Userspace:** A freestanding static `/init` is built for each reference ISA,
 packed into the Omega initrd format, loaded into PID 1's isolated address
-space, and entered in Ring 3. The init program performs `SYS_write` and
-`SYS_exit` through the native x86_64 syscall path. Full libc, process reaping,
-COW `fork`, exit/wait lifecycle, and native non-x86 userspace are now present; signals, scheduler-integrated process switching, and dynamic linking remain future work.
+space, and entered in the native least-privileged mode. The init programs
+perform `SYS_write` and `SYS_exit` through x86_64 `syscall`/`sysretq`, AArch64
+`svc`/`eret`, and RISC-V `ecall`/`sret` paths. x86_64 also verifies COW `fork`,
+write-fault isolation, exit, and wait/reap. Full libc, signals,
+architecture-neutral process switching, and dynamic linking remain future work.
 
 **Storage:** The architecture and initial implementation are specified in [`docs/STORAGE_ARCHITECTURE_PLAN.md`](docs/STORAGE_ARCHITECTURE_PLAN.md). The common layer is implemented and tested; GPT/MBR parsing, synthetic writes/flushes, and guarded VirtIO-Block request paths are available. NVMe, AHCI/SATA/ATAPI, SDHCI, USB Mass Storage, filesystem mounting, and hardware-specific writes remain subsequent milestones.
 
@@ -105,6 +137,7 @@ COW `fork`, exit/wait lifecycle, and native non-x86 userspace are now present; s
 
 ```bash
 ./scripts/test_userland.sh         # build /init, pack initrd, boot Ring 3 under QEMU
+./scripts/test_native_userland.sh  # verify AArch64 EL0 and RISC-V U-mode /init
 ```
 
 The focused userspace test uses QEMU's loader device to place the generated
@@ -123,6 +156,23 @@ isolated with `OMEGA_BUILD_ROOT` and `OMEGA_IMAGE_ROOT`.
 
 ---
 
+## Documentation
+
+| Document | Purpose |
+| :--- | :--- |
+| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Kernel architecture and subsystem boundaries |
+| [`docs/ABI.md`](docs/ABI.md) | System call and userspace ABI |
+| [`docs/ROADMAP.md`](docs/ROADMAP.md) | Current milestones and remaining work |
+| [`docs/RUNNING.md`](docs/RUNNING.md) | Build and QEMU execution guide |
+| [`docs/FIRMWARE_BOOT.md`](docs/FIRMWARE_BOOT.md) | Firmware and bootloader compatibility |
+| [`docs/STORAGE_ARCHITECTURE_PLAN.md`](docs/STORAGE_ARCHITECTURE_PLAN.md) | Storage architecture and driver roadmap |
+| [`docs/VGA_DISPLAY_PLAN.md`](docs/VGA_DISPLAY_PLAN.md) | x86_64 display implementation |
+| [`docs/DISPLAY_AARCH64_RISCV_PLAN.md`](docs/DISPLAY_AARCH64_RISCV_PLAN.md) | AArch64 and RISC-V display implementation |
+| [`docs/OMEGA_SDK_PLAN.md`](docs/OMEGA_SDK_PLAN.md) | Future lightweight userspace SDK |
+| [`scripts/README.md`](scripts/README.md) | Script catalog and verification workflow |
+
+---
+
 ## Repository Structure
 
 ```text
@@ -131,6 +181,9 @@ omega/
 ├── .devcontainer/                 # VSCode DevContainers and GitHub Codespaces configuration
 ├── .github/workflows/ci.yml       # GitHub Actions Multi-Arch CI/CD Pipeline
 ├── CMakeLists.txt                 # Master CMake cross-compilation target script
+├── assets/branding/
+│   ├── omega-logo-hd.png          # HD flat-color Omega PNG logo
+│   └── omega-logo-flat.svg        # Scalable flat-color Omega SVG logo
 ├── cmake/
 │   ├── x86_64-toolchain.cmake     # x86_64 toolchain configuration
 │   ├── aarch64-toolchain.cmake    # AArch64 toolchain configuration
@@ -183,6 +236,7 @@ omega/
 │   ├── build_user_init.sh          # Build the architecture-specific userspace /init
 │   ├── create_initrd.py            # Pack userspace artifacts into an Omega initrd
 │   ├── test_userland.sh            # x86_64 ELF/Ring 3/syscall integration test
+│   ├── test_native_userland.sh     # AArch64 EL0 and RISC-V U-mode integration test
 │   ├── test_scripts_unit.py       # Python launcher and emulator unit-test entry point
 │   └── test_disk_images.sh        # Disk Image Verification Test Suite
 ├── kernel/
@@ -272,8 +326,8 @@ inspection, artifact checks, profile-backed creation, generic creation, launch,
 stop, validation, command preview, live logs, deletion, and an integrated
 Tkinter VNC viewer with long-lived idle sessions, background connection
 retries, composited framebuffer updates, keyboard, mouse, wheel, and
-clipboard integration. Android
-Android virtualization profiles are inspectable external-adapter profiles and cannot
+clipboard integration. Android virtualization profiles are inspectable
+external-adapter profiles and cannot
 currently be created as native OVDs.
 
 The VNC viewer is intended for local QEMU development and binds to
@@ -302,6 +356,7 @@ QMP, and GUI guide, see [`emulator/README.md`](emulator/README.md).
 ./scripts/test_scheduler.sh    # x86_64 timer preemption/context switching
 ./scripts/test_elf_loader.sh   # Linux ELF64 executable/shared-object validation
 ./scripts/test_userland.sh     # x86_64 initrd, PT_LOAD, Ring 3, and syscall integration
+./scripts/test_native_userland.sh # AArch64 EL0 and RISC-V U-mode userspace integration
 python3 scripts/test_scripts_unit.py # Python emulator manager and dry-run unit tests
 ./scripts/test_disk_images.sh   # Bootable disk image tests
 python3 -m unittest emulator.test_ovd_unit # OVD configuration and lifecycle tests

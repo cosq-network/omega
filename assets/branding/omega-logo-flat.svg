@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1254" height="1254" viewBox="0 0 1254 1254" role="img" aria-labelledby="title desc">
+  <title id="title">Omega operating system logo</title>
+  <desc id="desc">A flat-color Roman omega mark with a cyan central pillar, violet base panels, and magenta inner accents.</desc>
+
+  <!-- Main omega body. Every fill is a solid color; no gradients are used. -->
+  <path fill="#071B66" fill-rule="evenodd" d="
+    M627 150
+    C876 150 1078 352 1078 601
+    C1078 850 876 1052 627 1052
+    C378 1052 176 850 176 601
+    C176 352 378 150 627 150 Z
+    M627 299
+    C460 299 325 434 325 601
+    C325 768 460 903 627 903
+    C794 903 929 768 929 601
+    C929 434 794 299 627 299 Z"/>
+
+  <!-- Solid violet base panels. -->
+  <path fill="#6A18E8" d="M154 930 H520 V1110 H190 Z"/>
+  <path fill="#6A18E8" d="M734 930 H1100 L1064 1110 H734 Z"/>
+
+  <!-- Pale-cyan structural insets. -->
+  <path fill="#D9F7FF" d="M154 930 H520 V954 H174 Z"/>
+  <path fill="#D9F7FF" d="M734 930 H1100 L1080 954 H734 Z"/>
+  <path fill="#D9F7FF" fill-rule="evenodd" d="
+    M627 280 C459 280 338 416 338 601 C338 730 413 830 520 883
+    L520 907 C398 849 315 739 315 601 C315 422 454 277 627 277
+    C800 277 939 422 939 601 C939 739 856 849 734 907 L734 883
+    C841 830 916 730 916 601 C916 416 795 280 627 280 Z"/>
+
+  <!-- Solid magenta inner accents. -->
+  <path fill="#F20BC9" d="M351 601 C351 499 395 410 466 350 L481 369 C418 425 374 507 374 601 C374 681 405 752 458 805 L438 819 C383 761 351 684 351 601 Z"/>
+  <path fill="#F20BC9" d="M903 601 C903 499 859 410 788 350 L773 369 C836 425 880 507 880 601 C880 681 849 752 796 805 L816 819 C871 761 903 684 903 601 Z"/>
+
+  <!-- Cyan central omega pillar. -->
+  <path fill="#05D9F2" d="M459 690 L604 800 L604 1110 L548 1110 L548 829 L459 761 Z"/>
+  <path fill="#05D9F2" d="M795 690 L650 800 L650 1110 L706 1110 L706 829 L795 761 Z"/>
+  <path fill="#B9F7FF" d="M459 690 L604 800 L604 824 L459 714 Z"/>
+  <path fill="#B9F7FF" d="M795 690 L650 800 L650 824 L795 714 Z"/>
+</svg>
