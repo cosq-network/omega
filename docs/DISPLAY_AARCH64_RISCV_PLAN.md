@@ -207,7 +207,7 @@ kernel_main()
 
 ### 5.3 Framebuffer Memory Mapping
 
-x86_64 currently identity-maps the low 4 GiB and probes FB with a write/read test. **AArch64 and RISC-V require real `vmm_map_page()`**:
+x86_64 currently identity-maps the low 4 GiB and probes FB with a write/read test. AArch64 and RISC-V now have real per-process page-table walks through `vmm_map_page()`; the current SimpleFb display path intentionally retains a bounded identity-map window for early QEMU firmware framebuffers:
 
 ```text
 Physical:  From DT reg or VirtIO backing pages
@@ -217,10 +217,10 @@ Cache:     Device-nGnRnE (ARM) / appropriate PTE attributes for uncached FB
 Pages:     ceil(stride × height / 4096)
 ```
 
-**Blocker:** `kernel/sys/vmm.cpp` is currently a stub on all architectures. Phase 7.2b should either:
-
-- **Option A (preferred):** Implement real page table walks for AArch64/RISC-V before display work, or
-- **Option B (QEMU stopgap):** Extend early boot page tables in `boot.s` to cover known FB physical regions.
+**Remaining display blocker:** replace the bounded identity framebuffer window
+with a kernel-only arbitrary-physical framebuffer mapping and cache policy. The
+process VMM and user COW page-table paths are implemented and verified on all
+three reference ISAs.
 
 ---
 
@@ -266,7 +266,7 @@ kernel/
 | Task ID | Task | Files | Verification |
 | :---: | :--- | :--- | :--- |
 | **7.2b.2a** | Parse `simple-framebuffer` node | `kernel/sys/fdt.cpp`, `display.cpp` | Implemented with format metadata |
-| **7.2b.2b** | Map FB via VMM | `display.cpp`, `vmm.cpp` | Identity-map QEMU stopgap implemented; real VMM remains pending |
+| **7.2b.2b** | Map FB via VMM | `display.cpp`, `vmm.cpp` | Bounded identity-map QEMU path implemented; arbitrary physical mapping remains |
 | **7.2b.2c** | Replace stub; enable display init in `main.cpp` | `display.cpp`, `main.cpp` | Implemented; banner/console route over FB when handed off |
 | **7.2b.2d** | In-kernel self-tests | `display.cpp` | Implemented SimpleFb pixel read/write test |
 | **7.2b.2e** | CI test script | `scripts/test_display_aarch64.sh` | Implemented HAL/fallback smoke test |
@@ -368,7 +368,7 @@ Use the cross-platform Python launcher:
 
 | Dependency | Status | Impact |
 | :--- | :--- | :--- |
-| **Real VMM** (`map_page`) | Still a stub for non-x86 bring-up | Current SimpleFb path uses identity-map QEMU stopgap; arbitrary physical FB mappings need real page tables |
+| **Real VMM** (`map_page`) | Process and user mappings implemented on all reference ISAs | Current SimpleFb path uses a bounded identity-map QEMU window; arbitrary physical FB mappings and cache-specific display mappings remain |
 | **FDT pointer in boot** | Implemented | AArch64 captures `x0`; RISC-V receives OpenSBI `a1` and passes it to C++ |
 | **RISC-V kernel boot** | Fixed for QEMU OpenSBI | `_start` is first in the image, PMM metadata is kernel-owned, and `kernel_main()` reaches idle |
 | **PCI on AArch64** | Stub scanner | VirtIO-GPU needs ECAM or MMIO transport |

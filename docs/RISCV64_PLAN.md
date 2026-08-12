@@ -26,12 +26,12 @@ omega/
 ├── cmake/
 │   ├── x86_64-toolchain.cmake
 │   ├── aarch64-toolchain.cmake
-│   └── riscv64-toolchain.cmake      # [NEW] RISC-V 64 toolchain configuration
+│   └── riscv64-toolchain.cmake      # RISC-V 64 toolchain configuration
 └── kernel/
     ├── arch/
     │   ├── x86_64/
     │   ├── aarch64/
-    │   └── riscv64/                 # [NEW] RISC-V 64 architecture modules
+    │   └── riscv64/                 # RISC-V 64 architecture modules
     │       ├── boot.s               # S-mode entry, satp paging, stack setup
     │       ├── trap.s               # Exception & Interrupt Trap Handler (stvec)
     │       ├── plic.cpp             # PLIC Interrupt Controller driver

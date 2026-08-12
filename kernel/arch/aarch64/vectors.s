@@ -3,11 +3,11 @@
 .align 11
 .global el1_vector_table
 el1_vector_table:
+.align 7; b current_sync
 .align 7; b unhandled_exception
 .align 7; b unhandled_exception
 .align 7; b unhandled_exception
-.align 7; b unhandled_exception
-.align 7; b unhandled_exception
+.align 7; b current_sync
 .align 7; b unhandled_exception
 .align 7; b unhandled_exception
 .align 7; b unhandled_exception
@@ -69,6 +69,12 @@ lower_irq:
 
 unhandled_exception:
     wfe
+    b unhandled_exception
+
+current_sync:
+    mrs x0, esr_el1
+    mrs x1, far_el1
+    bl aarch64_kernel_sync_fault
     b unhandled_exception
 
 .section .text

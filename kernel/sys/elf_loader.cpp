@@ -150,10 +150,8 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
             for (uint64_t cursor = copy_start; cursor < copy_end; ++cursor)
                 destination[cursor - page_start] = elf_data[ph->p_offset + cursor - ph->p_vaddr];
             if (new_page) {
-#if defined(__x86_64__)
                 if (process->mapping_count >= 32) return false;
                 process->mappings[process->mapping_count++] = {address, memory::PAGE_SIZE, false};
-#endif
             }
         }
     }
@@ -163,7 +161,7 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
 #elif defined(__aarch64__)
     constexpr uintptr_t stack_top = 0x0000006fffff0000ull;
 #else
-    constexpr uintptr_t stack_top = 0x00007ffffff00000ull;
+    constexpr uintptr_t stack_top = 0x0000400000005000ull;
 #endif
     constexpr uintptr_t stack_page = stack_top - memory::PAGE_SIZE;
     const uintptr_t frame = memory::PhysicalMemoryManager::alloc_frame();
@@ -174,16 +172,35 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
     }
     auto* stack_memory = reinterpret_cast<uint8_t*>(frame);
     for (size_t i = 0; i < memory::PAGE_SIZE; ++i) stack_memory[i] = 0;
-#if defined(__x86_64__)
     if (process->mapping_count >= 32) return false;
     process->mappings[process->mapping_count++] = {stack_page, memory::PAGE_SIZE, false};
-#endif
     *entry = static_cast<uintptr_t>(header->e_entry);
-    *stack = stack_top - 16;
-#if defined(__x86_64__)
+    *stack = stack_page + 0x800;
     process->user_entry = *entry;
     process->user_stack = *stack;
-#endif
+
+    // Omega initial process stack ABI:
+    //   argc, argv, envp, auxv; argv[0] points to /init; auxv ends AT_NULL.
+    auto* stack_words = reinterpret_cast<uint64_t*>(stack_memory);
+    auto* argv = reinterpret_cast<uintptr_t*>(stack_memory + 0x880);
+    auto* envp = reinterpret_cast<uintptr_t*>(stack_memory + 0x890);
+    auto* auxv = reinterpret_cast<uintptr_t*>(stack_memory + 0x8a0);
+    auto* program = reinterpret_cast<char*>(stack_memory + 0x8c0);
+    const char init_name[] = "/init";
+    for (size_t i = 0; i < sizeof(init_name); ++i) program[i] = init_name[i];
+    const uintptr_t user_argv = stack_page + 0x880;
+    const uintptr_t user_envp = stack_page + 0x890;
+    const uintptr_t user_auxv = stack_page + 0x8a0;
+    const uintptr_t user_program = stack_page + 0x8c0;
+    argv[0] = user_program;
+    argv[1] = 0;
+    envp[0] = 0;
+    auxv[0] = 0;
+    auxv[1] = 0;
+    stack_words[0x800 / sizeof(uint64_t)] = 1;
+    stack_words[0x808 / sizeof(uint64_t)] = user_argv;
+    stack_words[0x810 / sizeof(uint64_t)] = user_envp;
+    stack_words[0x818 / sizeof(uint64_t)] = user_auxv;
     return true;
 }
 

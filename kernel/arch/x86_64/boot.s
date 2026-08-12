@@ -153,7 +153,8 @@ paging_done:
     /* Set Long Mode Bit in EFER MSR (0xC0000080) */
     mov $0xC0000080, %ecx
     rdmsr
-    or $0x100, %eax
+    /* Enable long mode and make NX page permissions architectural. */
+    or $0x900, %eax
     wrmsr
 
     /* Enable Paging in CR0 */

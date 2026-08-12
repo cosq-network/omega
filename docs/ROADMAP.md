@@ -100,7 +100,7 @@ Phase 7 completes the patterns started in Phases 1–6 inside QEMU. These subsys
 | **Phase 7.3: Keyboard/HID Input** | `IN PROGRESS` | Versioned cross-ISA input ABI, bounded event queue, HID boot-report decoders, and x86_64 PS/2 polling backend | Raw key transitions, modifier flags, relative motion, buttons, input syscalls, synthetic adapters for AArch64/RISC-V | `scripts/test_input_unit.sh`, all-ISA builds, QEMU boot markers; USB/xHCI and native IRQ delivery remain pending |
 | **Phase 7.4: SMP Multi-Core** | `PLANNED` | Symmetric multiprocessing across all cores | APIC ICR (x86), PSCI (AArch64), OpenSBI IPI (RISC-V); per-CPU run queues | Multi-core boot log, parallel thread execution |
 | **Phase 7.5: Timer-Driven Preemption** | `PARTIAL` | x86_64 PIT IRQ0 plus AArch64 generic-timer and RISC-V SBI timer programming, acknowledgement, and trap-frame return | Cross-ISA timer smoke tests pass; process switching and SMP remain |
-| **Phase 7.6: Per-Process Address Spaces** | `PARTIAL` | x86_64 COW fork/fault/exit/wait lifecycle plus AArch64 TTBR0 and RISC-V Sv39 process roots with native ELF init mapping | `scripts/test_process.sh`, `scripts/test_native_userland.sh`; non-x86 COW and permission-recovery tests remain |
+| **Phase 7.6: Per-Process Address Spaces** | `PARTIAL` | Per-process x86_64, AArch64 TTBR0, and RISC-V Sv39 roots with native ELF init mapping and COW fork/fault/exit/wait lifecycle verification on all three ISAs | `scripts/test_process.sh`, `scripts/test_native_userland.sh`, `scripts/test_c_sdk.sh`; scheduler switching, permission-fault termination, and SMP remain |
 | **Phase 7.7: IPC Foundation** | `PLANNED` | Inter-process communication for microkernel services | Message passing, capability tokens, shared-memory grants | Driver server ↔ client round-trip |
 
 **Exit criteria:** Omega boots in QEMU with block storage, **graphical console on x86_64 (done)**, SMP, preemptive scheduling, process isolation, and a userspace driver server communicating over IPC.
@@ -150,10 +150,10 @@ complete.
 | Milestone | Status | Deliverable | Verification |
 | :--- | :---: | :--- | :--- |
 | **7.D.1 Timer-independent scheduler core** | `PLANNED` | Architecture-neutral scheduler clock, priorities, accounting, and preemption hooks | Identical scheduler tests on all ISAs |
-| **7.D.2 Per-process address spaces** | `PARTIAL` | x86_64 isolated page tables with COW lifecycle, active process activation, process-owned Linux-style credentials/descriptors, syscall numbering, anonymous mappings, and bounded user-range checks; AArch64 TTBR0 and RISC-V Sv39 roots now execute native `/init` | `scripts/test_process.sh`, `scripts/test_native_userland.sh`; non-x86 COW, permission recovery, and scheduler switching remain |
+| **7.D.2 Per-process address spaces** | `PARTIAL` | Isolated x86_64, AArch64 TTBR0, and RISC-V Sv39 page tables with COW lifecycle, active process activation, process-owned Linux-style credentials/descriptors, syscall numbering, anonymous mappings, and bounded user-range checks | `scripts/test_process.sh`, `scripts/test_native_userland.sh`, `scripts/test_c_sdk.sh`; permission-fault termination and scheduler switching remain |
 | **7.D.3 Capability-based IPC** | `PLANNED` | Typed messages, endpoint ownership, capability transfer, shared-memory grants, timeout/cancellation | Driver-server round-trip and abuse tests |
 | **7.D.4 Portable driver contracts** | `PLANNED` | Common interrupt, DMA, MMIO, block, net, display, and input interfaces | Synthetic drivers plus all-ISA contract tests |
-| **7.D.5 Userspace bootstrap** | `PARTIAL` | Initrd-backed PID 1, PT_LOAD mapping, native entry/syscall return, minimal crt0/syscall stubs, and exit path on x86_64, AArch64, and RISC-V; full libc, shell, and architecture-neutral process switching remain | `scripts/test_userland.sh`, `scripts/test_native_userland.sh`; lifecycle/COW coverage is currently x86_64 |
+| **7.D.5 Userspace bootstrap** | `PARTIAL` | Initrd-backed PID 1, PT_LOAD mapping, Omega initial stack ABI, native entry/syscall return, minimal crt0/syscall stubs, C runtime, and exit path on all three ISAs; full libc, shell, signals, and architecture-neutral process switching remain | `scripts/test_userland.sh`, `scripts/test_native_userland.sh`, `scripts/test_c_sdk.sh` |
 | **7.D.6 Linux identity and permission model** | `PARTIAL` | UID/GID credentials, supplementary groups, umask, root DAC rules, mode bits, VFS traversal/read/write checks, process binding on the x86_64 foundation, and Linux syscall-number tables on all ISAs | `scripts/test_security.sh`, all-ISA builds/permission checks, ext4 ownership/mode parsing |
 
 **Architecture-track exit criteria:** each target boots on its reference QEMU
@@ -591,13 +591,13 @@ Year 4–5      Phase 10C + 11       Phone product, public release, OEM partners
 
 Concrete sequence mapped to the existing codebase:
 
-1. **Complete the x86_64 userspace follow-up sequence** — process exit/reaping, safe Ring 3 timer preemption, permission-aware page faults, COW `fork`, and the minimal C runtime described above.
+1. **Complete process lifecycle hardening** — safe user timer preemption, permission-aware fault termination, scheduler integration, and process cleanup across all three ISAs.
 2. **Finish x86_64 P0 parity** — ACPI, APIC/x2APIC, HPET/TSC, SMP, MSI/MSI-X, UEFI GOP, PCIe ECAM, and hardened memory permissions on QEMU `q35`.
 3. **Finish AArch64 P0 parity** — PSCI, complete GICv3 support, generic timers, SMP, cache/MMU attributes, UEFI/DT normalization, and VirtIO-MMIO completion on QEMU `virt`.
 4. **Advance RISC-V P1 parity** — SBI HSM/timer/IPI services, SMP, PLIC hardening, AIA capability planning, Sv48/PMP preparation, and VirtIO-MMIO completion on QEMU `virt`.
 5. **Complete storage and display reference paths** — NVMe/AHCI/SDHCI/USB layers, ext4 writeback, AArch64/RISC-V VirtIO-GPU, UEFI GOP, and real framebuffer integration. *(Standard VGA and x86_64 transitional VirtIO-Block completion are validated.)*
 6. **Validate one reference board per ISA** — QEMU `q35`/OVMF, QEMU AArch64 `virt`, QEMU RISC-V `virt`, then Raspberry Pi 4/5 and one x86_64 laptop.
-7. **Extend the userspace base** — After the x86_64 lifecycle milestones, add a serial shell, Omega SDK CRT/libc, process tools, filesystem utilities, passwd/group/permission tooling, and a versioned Linux-compatible syscall/IPC ABI in `docs/ABI.md`. The first x86_64 init/ELF/Ring 3/syscall slice is verified by `scripts/test_userland.sh`.
+7. **Extend the userspace base** — Add the broader Omega SDK libc, serial shell, process tools, filesystem utilities, passwd/group/permission tooling, and versioned IPC interfaces after the verified all-ISA static C lifecycle milestone. The current C SDK is verified by `scripts/test_c_sdk.sh`.
 8. **Move drivers behind IPC** — Storage, network, display, input, and USB as capability-scoped userspace servers with measured IPC overhead.
 9. **Keep OVD aligned with kernel maturity** — Add architecture capability gates, live boot matrices, device hotplug scenarios, artifact manifests, and profile readiness checks for each QEMU reference target.
 10. **Defer phone work** — Until x86_64 and AArch64 laptop/tablet reference systems demonstrate reliable boot, storage, networking, display, input, power, recovery, and userspace quality.

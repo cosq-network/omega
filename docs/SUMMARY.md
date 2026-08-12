@@ -1,10 +1,11 @@
 # Omega Kernel Project Completion Summary
 
 The Omega Kernel has a verified cross-architecture bring-up baseline on
-x86_64, AArch64, and RISC-V 64. The x86_64 reference platform now also boots
-a real initrd-backed static userspace process through ELF mapping, Ring 3
-entry, and native syscalls. Production userspace, hardware drivers, and
-several roadmap phases remain incomplete.
+x86_64, AArch64, and RISC-V 64. All three reference platforms boot a real
+initrd-backed static userspace process through ELF mapping, least-privilege
+entry, native syscalls, and page-granular COW lifecycle tests. Production
+userspace, hardware drivers, signals, SMP, and several roadmap phases remain
+incomplete.
 
 ---
 
@@ -16,14 +17,14 @@ several roadmap phases remain incomplete.
 | **x86_64 Long Mode Boot** | PML4 Paging, GDT, Xen PVH note | Complete |
 | **AArch64 EL1 Boot** | `CurrentEL` switch, `VBAR_EL1` vectors | Complete |
 | **Physical Memory Manager** | 4KiB Bitmap Frame Allocator | Complete |
-| **Virtual Memory Manager** | `CR3` & `TTBR0_EL1` Page Tables | x86_64 process mapping complete; non-x86 bring-up |
+| **Virtual Memory Manager** | `CR3`, `TTBR0_EL1`, and `satp` page tables | Per-process mapping and COW lifecycle verified on all ISAs |
 | **Kernel Heap Allocator** | Dynamic `kmalloc` & `kfree` | Complete |
 | **Hardware Interrupts** | x86_64 256-entry IDT & AArch64 VBAR | Complete |
 | **Thread Scheduler** | Circular Round-Robin Scheduler | Complete |
 | **Syscall ABI Dispatcher** | `SYS_WRITE`, `SYS_YIELD`, `SYS_EXIT` | Complete |
 | **Virtual Filesystem (VFS)**| VFS Node Tree (`/` Mounted) | Complete |
-| **RAM Disk (Initrd)** | Memory file tree with x86_64 `/init` artifact loading | x86_64 complete; non-x86 foundation |
-| **Userspace Bootstrap** | Static ELF `PT_LOAD`, PID 1, Ring 3, native x86_64 syscalls | x86_64 reference slice complete |
+| **RAM Disk (Initrd)** | Memory file tree with matching-ISA `/init` artifact loading | All three reference ISAs verified |
+| **Userspace Bootstrap** | Static ELF `PT_LOAD`, PID 1, initial stack ABI, native privilege transitions and syscalls | All three reference ISAs verified |
 | **Storage Architecture** | Pluggable block-device, transport, partition, filesystem, DMA, and hotplug plan | Planned |
 | **Communications Architecture** | Generic serial, Ethernet, USB 2/3, USB Type-C, and 2.4/5 GHz Wi-Fi integration plan | Planned |
 | **Pointing Devices Architecture** | Generic mouse, touchpad, touchscreen, HID, PS/2, I²C/SPI, calibration, gestures, and input-service plan | Planned |

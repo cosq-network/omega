@@ -161,6 +161,8 @@ bash "${PROJECT_ROOT}/scripts/test_storage.sh"
 bash "${PROJECT_ROOT}/scripts/test_ext4_unit.sh"
 bash "${PROJECT_ROOT}/scripts/test_input_unit.sh"
 bash "${PROJECT_ROOT}/scripts/test_native_userland.sh"
+bash "${PROJECT_ROOT}/scripts/test_c_sdk.sh"
+bash "${PROJECT_ROOT}/scripts/test_sdk_manifest.sh"
 
 echo -e "\n[*] Running OVD storage transport and lifecycle test suite..."
 python3 -m unittest emulator.test_ovd_unit emulator.test_profile_catalog emulator.test_profile_ext4_integration

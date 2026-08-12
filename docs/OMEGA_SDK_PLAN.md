@@ -23,10 +23,14 @@ The first compatibility target is **source and link compatibility for small
 Linux-style applications**, not arbitrary Linux binary compatibility. Existing
 Linux applications must be rebuilt against the Omega sysroot and Omega CRT.
 
-Current bootstrap status: x86_64 can execute a freestanding static `/init`
-from the Omega initrd using a minimal assembly startup and direct syscall stub.
-The general Omega CRT, libc headers/libraries, allocator wrappers, and C/C++
-SDK packaging described below remain implementation work.
+Current bootstrap status: x86_64, AArch64, and RISC-V can execute a freestanding
+static `/init` from the Omega initrd using native privilege transitions and
+direct syscall stubs. The initial process stack ABI is now defined in
+[`ABI.md`](ABI.md). A repository bootstrap C runtime now provides common
+headers, memory/string helpers, a small allocator, stdio helpers,
+architecture-native syscall stubs, crt0 sources, and manifest validation. C
+application runtime execution, process-exit handoff, and page-granular
+fork/COW lifecycle self-tests are covered on all three reference ISAs.
 
 ## 2. Non-Goals for SDK v1
 
@@ -65,9 +69,9 @@ link mode, and required runtime features.
 
 | Target triple | ELF machine | C calling convention | C++ ABI baseline | Required ISA policy |
 | :--- | :---: | :--- | :--- | :--- |
-| `x86_64-omega` | `EM_X86_64` (`62`) | System V AMD64 | Itanium C++ ABI with LLVM ABI behavior | SSE2 baseline; no red zone in kernel, normal user red zone allowed if supported |
-| `aarch64-omega` | `EM_AARCH64` (`183`) | AAPCS64 | Itanium C++ ABI with LLVM ABI behavior | ARMv8-A baseline, soft-float policy decided before SDK v1 freeze |
-| `riscv64-omega` | `EM_RISCV` (`243`) | RISC-V ELF psABI | Itanium C++ ABI with LLVM ABI behavior | RV64GC, `lp64d` initially; vector extension optional later |
+| `x86_64-omega` (`x86_64-unknown-none-elf`) | `EM_X86_64` (`62`) | System V AMD64 | Itanium C++ ABI with LLVM ABI behavior | SSE2 baseline; `-mno-red-zone` for kernel, application policy documented separately |
+| `aarch64-omega` (`aarch64-unknown-none`) | `EM_AARCH64` (`183`) | AAPCS64 | Itanium C++ ABI with LLVM ABI behavior | ARMv8-A baseline; soft-float policy remains a v1 freeze item |
+| `riscv64-omega` (`riscv64-unknown-none-elf`) | `EM_RISCV` (`243`) | RISC-V ELF psABI | Itanium C++ ABI with LLVM ABI behavior | RV64GC, `lp64d` initially; vector extension optional later |
 
 The SDK must never silently mix objects from different targets. Archive and
 object metadata checks should reject an incompatible `e_machine`, ABI,
@@ -100,7 +104,7 @@ Representative profiles:
 ```text
 x86_64:
   --target=x86_64-unknown-none-elf
-  -march=x86-64 -mno-red-zone
+  -march=x86-64
 
 AArch64:
   --target=aarch64-unknown-none-elf
@@ -166,6 +170,20 @@ sdk/
 
 The sysroot must be relocatable. Headers and libraries must not embed the
 developer's checkout path.
+
+## 6.1 Frozen userspace address layouts
+
+The initial static executable layouts are fixed for SDK bootstrap work:
+
+| Target | ELF base | `mmap` base | `mmap` limit | Initial stack page |
+| :--- | ---: | ---: | ---: | ---: |
+| x86_64 | `0x400000000000` | `0x400000000000` | `0x700000000000` | `0x400000004000` |
+| AArch64 | `0x4000000000` | `0x4000000000` | `0x7000000000` | `0x6ffffef000` |
+| RISC-V 64 | `0x40000000` | `0x40000000` | `0x70000000` | `0x6fffe000` |
+
+The kernel-provided initial stack layout is specified in [`ABI.md`](ABI.md).
+These addresses are bootstrap ABI values, not a promise that future ASLR will
+be unavailable.
 
 ## 7. C Runtime and libc Strategy
 
@@ -400,7 +418,7 @@ with unsupported dynamic requirements.
 For every ISA:
 
 1. boot the kernel with an Omega static executable in the initrd;
-2. verify `argc`, `argv`, `envp`, and `auxv` setup;
+2. verify the documented `argc`, `argv`, `envp`, and `auxv` setup;
 3. execute `write`, `mmap`, `munmap`, `brk`, UID/GID, and file-permission
    calls;
 4. verify a denied permission returns the expected errno;
@@ -436,8 +454,8 @@ CI should build and test each profile independently:
 
 ### SDK-2: Omega C++ SDK
 
-- add `libomega-cpp`, libc++ subset, allocation/runtime support, and C++ ABI
-  tests;
+- begin only after SDK-1 passes on all three ISAs; add `libomega-cpp`, a
+  libc++ subset, allocation/runtime support, and C++ ABI tests;
 - run one C++ program using containers and C interop on all targets.
 
 ### SDK-3: POSIX static profile
@@ -470,6 +488,10 @@ CI should build and test each profile independently:
 - Reject unsupported artifacts early with actionable diagnostics.
 - Keep the SDK independent of kernel-private headers.
 - Require the same test application to pass on x86_64, AArch64, and RV64.
+- Do not advertise C++ runtime support until the static C SDK application
+  passes on all three ISAs.
+- Do not advertise dynamic linking, pthreads, or broad Linux source
+  compatibility as part of the static C/C++ SDK milestone.
 
 ## 16. Exit Criteria for SDK v1
 

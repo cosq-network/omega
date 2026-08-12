@@ -65,6 +65,10 @@ alignas(16) static uint8_t exception_stack[16 * 1024];
 #endif
 
 #if defined(__aarch64__)
+extern "C" void aarch64_kernel_sync_fault(uint64_t esr, uint64_t far) {
+    kernel::kprintf("[PANIC] AArch64 EL1 sync fault ESR=%x FAR=%x\n", esr, far);
+}
+
 extern "C" void aarch64_prepare_exception_stack(uintptr_t);
 extern "C" uintptr_t aarch64_exception_handler(uintptr_t* frame) {
     uint64_t esr; asm volatile("mrs %0, esr_el1" : "=r"(esr));
@@ -76,6 +80,7 @@ extern "C" uintptr_t aarch64_exception_handler(uintptr_t* frame) {
         asm volatile("msr elr_el1, %0" : : "r"(pc + 4) : "memory");
     } else if (ec == 0x20 || ec == 0x21 || ec == 0x24 || ec == 0x25) {
         uint64_t far; asm volatile("mrs %0, far_el1" : "=r"(far));
+        if ((ec == 0x24 || ec == 0x25) && process::Manager::handle_cow_fault(far)) return 0;
         kernel::kprintf("[!] AArch64 EL0 %s fault at %x (ESR %x)\n",
                         (ec == 0x20 || ec == 0x21) ? "instruction" : "data", far, esr);
     } else {
@@ -96,6 +101,7 @@ extern "C" uintptr_t riscv_exception_handler(uintptr_t* frame) {
             frame[17], frame[10], frame[11], frame[12], frame[13], frame[14], frame[15]));
         frame[32] += 4;
     } else if (cause == 12 || cause == 13 || cause == 15) {
+        if (cause == 15 && process::Manager::handle_cow_fault(frame[34])) return 0;
         kernel::kprintf("[!] RISC-V U-mode %s page fault at %x pc=%x\n",
                         cause == 12 ? "instruction" : cause == 13 ? "load" : "store", frame[34], frame[32]);
     } else {

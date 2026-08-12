@@ -42,11 +42,11 @@
 - **Keyboard and HID Input Foundation**: Versioned 64-byte input events, bounded kernel queue, raw keyboard transitions, modifier flags, relative mouse motion, buttons, input syscalls, HID boot-report decoders, and x86_64 PS/2 polling with portable AArch64/RISC-V adapters.
 - **Virtual Filesystem (VFS) & Initrd RAM Disk**: POSIX-like node tree with Linux-style UID/GID ownership, mode bits, umask-aware security foundations, traversal checks, and read/write permission enforcement.
 - **Linux-Compatible Users, Groups & Permissions**: Real/effective/saved filesystem IDs, supplementary groups, root DAC behavior, `chmod`/`chown`, `setuid`/`setgid`, `setgroups`, `umask`, and shared permission semantics on all three ISAs.
-- **Process Address Spaces**: Per-process roots with user mappings on x86_64, AArch64, and Sv39 RISC-V; permission-bearing ELF PT_LOAD mapping, retained physical frames, and native init activation on all three ISAs. x86_64 additionally has the verified COW fork/fault, exit, and wait/reap lifecycle.
+- **Process Address Spaces**: Per-process roots with user mappings on x86_64, AArch64, and Sv39 RISC-V; permission-bearing ELF PT_LOAD mapping, retained physical frames, native init activation, and verified COW fork/fault/exit/wait-reap lifecycle on all three ISAs.
 - **x86_64 Userspace Bootstrap**: Initrd-backed static `/init`, ELF `PT_LOAD` segment mapping, user stack creation, Ring 3 `iretq` entry, TSS-backed kernel stack, page-fault entry, and native `syscall`/`sysretq` return. Verify with [`scripts/test_userland.sh`](scripts/test_userland.sh).
-- **Cross-Architecture Userspace Bootstrap**: AArch64 EL0 and RISC-V U-mode `/init` programs with native exception entry, syscall dispatch, fault reporting, timer setup, and `eret`/`sret` return paths. Verify with [`scripts/test_native_userland.sh`](scripts/test_native_userland.sh).
+- **Cross-Architecture Userspace Bootstrap**: AArch64 EL0 and RISC-V U-mode `/init` programs with native exception entry, syscall dispatch, fault reporting, timer setup, COW fault recovery, and `eret`/`sret` return paths. Verify with [`scripts/test_native_userland.sh`](scripts/test_native_userland.sh) and [`scripts/test_c_sdk.sh`](scripts/test_c_sdk.sh).
 - **Userland Mode Manager**: Real x86_64 Ring 3, AArch64 EL0, and RISC-V U-mode entry, with lower-privilege syscall/fault vectors and architecture-specific timer setup.
-- **ELF 64-bit Executable Loader**: Bounded matching-ISA validation plus x86_64 static `ET_EXEC` `PT_LOAD` mapping and execution; relocations, dynamic linking, and broader process lifecycle remain pending.
+- **ELF 64-bit Executable Loader**: Bounded matching-ISA validation plus static `ET_EXEC` `PT_LOAD` mapping, initial-stack construction, and least-privilege execution on all three ISAs; relocations beyond static link-time resolution and dynamic linking remain pending.
 - **Linux ELF Artifact Boundary**: Validates matching-ISA ELF64 `ET_EXEC`/static `ET_DYN` program headers; static archives are link-time inputs, while dynamic `.so` execution remains gated on Omega's future dynamic linker.
 - **PCI Bus Scanner**: Bus configuration space reader (`0xCF8` Address / `0xCFC` Data ports) enumerating vendor/device IDs across 256 PCI buses.
 - **VirtIO Network Stack**: VirtIO-Net packet reader, Ethernet L2, IPv4 L3, and UDP/TCP L4 stack headers.
@@ -62,7 +62,7 @@
 
 ### Feature status
 
-The native `/init` path is complete on all three reference platforms. x86_64 additionally has the verified copy-on-write fork, write-fault, exit, and wait/reap lifecycle. Extending COW lifecycle handling and scheduler-driven process switching to AArch64 and RISC-V remains planned.
+The native `/init` path and page-granular COW fork, write-fault, exit, and wait/reap lifecycle are verified on all three reference platforms. Scheduler-driven process switching, signals, and SMP remain planned.
 
 ### Implemented subsystem groups
 
@@ -71,7 +71,7 @@ The native `/init` path is complete on all three reference platforms. x86_64 add
 | Boot and architecture | x86_64 long mode, AArch64 EL2 to EL1, RISC-V S-mode through OpenSBI |
 | Memory | Bitmap PMM, dynamic heap, x86_64 page tables, AArch64 TTBR0 mappings, RISC-V Sv39 mappings |
 | Userspace | Initrd-backed ELF `/init`, native Ring 3, EL0, and U-mode entry, syscall return paths on all three ISAs |
-| Processes | Per-process roots and user mappings on all ISAs; x86_64 COW lifecycle verification |
+| Processes | Per-process roots, user mappings, and COW lifecycle verification on all ISAs |
 | Security | Linux-style credentials, groups, ownership, mode checks, DAC rules, and umask foundations |
 | Filesystems | VFS node tree and initrd RAM disk with permission-aware access checks |
 | Storage | Common block API, DMA abstraction, GPT/MBR parsing, synthetic backend, experimental VirtIO-Block |
@@ -105,12 +105,12 @@ The native `/init` path is complete on all three reference platforms. x86_64 add
 
 **AArch64 / RISC-V:** Shared FDT parsing, framebuffer fallback, native lower-privilege entry/traps, per-process TTBR0/Sv39 roots, ELF `/init`, and timer setup are implemented. VirtIO-GPU, SMP, and production interrupt-controller support remain planned.
 
-**Userspace:** A freestanding static `/init` is built for each reference ISA,
+**Userspace:** A freestanding static C `/init` is built for each reference ISA,
 packed into the Omega initrd format, loaded into PID 1's isolated address
 space, and entered in the native least-privileged mode. The init programs
 perform `SYS_write` and `SYS_exit` through x86_64 `syscall`/`sysretq`, AArch64
-`svc`/`eret`, and RISC-V `ecall`/`sret` paths. x86_64 also verifies COW `fork`,
-write-fault isolation, exit, and wait/reap. Full libc, signals,
+`svc`/`eret`, and RISC-V `ecall`/`sret` paths. All three ISAs verify COW
+`fork`, write-fault isolation, exit, and wait/reap. Full libc, signals,
 architecture-neutral process switching, and dynamic linking remain future work.
 
 **Storage:** The architecture and initial implementation are specified in [`docs/STORAGE_ARCHITECTURE_PLAN.md`](docs/STORAGE_ARCHITECTURE_PLAN.md). The common layer is implemented and tested; GPT/MBR parsing, synthetic writes/flushes, and guarded VirtIO-Block request paths are available. NVMe, AHCI/SATA/ATAPI, SDHCI, USB Mass Storage, filesystem mounting, and hardware-specific writes remain subsequent milestones.
@@ -237,6 +237,9 @@ omega/
 │   ├── create_initrd.py            # Pack userspace artifacts into an Omega initrd
 │   ├── test_userland.sh            # x86_64 ELF/Ring 3/syscall integration test
 │   ├── test_native_userland.sh     # AArch64 EL0 and RISC-V U-mode integration test
+│   ├── test_c_sdk.sh               # Static C SDK application on all reference ISAs
+│   ├── sdk_manifest.py             # SDK artifact manifest creation/validation
+│   ├── test_sdk_manifest.sh        # SDK manifest integrity test
 │   ├── test_scripts_unit.py       # Python launcher and emulator unit-test entry point
 │   └── test_disk_images.sh        # Disk Image Verification Test Suite
 ├── kernel/
@@ -357,6 +360,8 @@ QMP, and GUI guide, see [`emulator/README.md`](emulator/README.md).
 ./scripts/test_elf_loader.sh   # Linux ELF64 executable/shared-object validation
 ./scripts/test_userland.sh     # x86_64 initrd, PT_LOAD, Ring 3, and syscall integration
 ./scripts/test_native_userland.sh # AArch64 EL0 and RISC-V U-mode userspace integration
+./scripts/test_c_sdk.sh        # Static C SDK application on all three reference ISAs
+./scripts/test_sdk_manifest.sh # SDK manifest integrity and tamper validation
 python3 scripts/test_scripts_unit.py # Python emulator manager and dry-run unit tests
 ./scripts/test_disk_images.sh   # Bootable disk image tests
 python3 -m unittest emulator.test_ovd_unit # OVD configuration and lifecycle tests

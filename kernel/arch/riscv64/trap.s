@@ -40,6 +40,8 @@ trap_entry:
     not t1, t1
     and t0, t0, t1
     csrw sstatus, t0
+    ld t0, 256(t6)
+    csrw sepc, t0
     ld x29, 232(t6); ld x30, 240(t6)
     ld sp, 0(t6)
     ld x31, 248(t6)

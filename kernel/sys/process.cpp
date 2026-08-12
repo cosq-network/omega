@@ -21,15 +21,10 @@ constexpr uintptr_t USER_MMAP_LIMIT = 0x0000700000000000ull;
 #endif
 constexpr uint32_t PROT_WRITE = 2;
 constexpr uint32_t PROT_EXEC = 4;
-#if defined(__x86_64__)
-constexpr uint32_t PROT_READ = 1;
-#endif
+[[maybe_unused]] constexpr uint32_t PROT_READ = 1;
 constexpr uint32_t MAP_FIXED = 0x10;
 constexpr int64_t ERR_EINVAL = 22;
 constexpr int64_t ERR_ENOMEM = 12;
-#if !defined(__x86_64__)
-constexpr int64_t ERR_ENOSYS = 38;
-#endif
 constexpr int64_t ERR_EEXIST = 17;
 
 Process* current_process = nullptr;
@@ -59,14 +54,9 @@ static bool overlaps(const Process* process, uintptr_t address, size_t length) {
 }
 
 static bool add_mapping(Process* process, uintptr_t address, size_t length) {
-#if !defined(__x86_64__)
-    (void)process; (void)address; (void)length;
-    return true;
-#else
     if (process->mapping_count >= 32) return false;
     process->mappings[process->mapping_count++] = {address, length, false};
     return true;
-#endif
 }
 }
 
@@ -186,7 +176,21 @@ int64_t Manager::fork() {
     Process* parent=current_process; Process* child=create();
     if (!child || parent->child_count>=8) return -ERR_ENOMEM;
     child->parent=parent;
-    for(uint32_t i=0;i<parent->mapping_count;++i){const Mapping&m=parent->mappings[i];for(size_t off=0;off<m.length;off+=memory::PAGE_SIZE){const uintptr_t va=m.address+off,phys=memory::VirtualMemoryManager::get_physical_address(&parent->address_space,va);if(!phys)return -ERR_ENOMEM;uint32_t flags=memory::VirtualMemoryManager::get_page_flags(&parent->address_space,va);if(flags&memory::PAGE_WRITABLE){flags&=~memory::PAGE_WRITABLE;memory::VirtualMemoryManager::set_page_flags(&parent->address_space,va,flags);}memory::PhysicalMemoryManager::retain_frame(phys);if(!memory::VirtualMemoryManager::map_page(&child->address_space,va,phys,flags))return -ERR_ENOMEM;}child->mappings[child->mapping_count++]={m.address,m.length,true};parent->mappings[i].cow=true;}
+    for(uint32_t i=0;i<parent->mapping_count;++i){
+        const Mapping&m=parent->mappings[i];
+        for(size_t off=0;off<m.length;off+=memory::PAGE_SIZE){
+            const uintptr_t va=m.address+off,phys=memory::VirtualMemoryManager::get_physical_address(&parent->address_space,va);
+            if(!phys)return -ERR_ENOMEM;
+            uint32_t flags=memory::VirtualMemoryManager::get_page_flags(&parent->address_space,va);
+            if(flags&memory::PAGE_WRITABLE){
+                flags&=~memory::PAGE_WRITABLE;
+                if(!memory::VirtualMemoryManager::set_page_flags(&parent->address_space,va,flags)) return -ERR_ENOMEM;
+            }
+            memory::PhysicalMemoryManager::retain_frame(phys);
+            if(!memory::VirtualMemoryManager::map_page(&child->address_space,va,phys,flags))return -ERR_ENOMEM;
+        }
+        child->mappings[child->mapping_count++]={m.address,m.length,true};parent->mappings[i].cow=true;
+    }
     parent->children[parent->child_count++]=child; return child->pid;
 }
 
@@ -203,15 +207,30 @@ int64_t Manager::wait4(pid_t pid, int32_t* status) {
 }
 
 bool Manager::handle_cow_fault(uintptr_t address) {
-    if(!current_process)return false; address&=~(memory::PAGE_SIZE-1);
-    for(uint32_t i=0;i<current_process->mapping_count;++i){Mapping&m=current_process->mappings[i];if(m.cow&&address>=m.address&&address<m.address+m.length){uintptr_t old=memory::VirtualMemoryManager::get_physical_address(&current_process->address_space,address),fresh=memory::PhysicalMemoryManager::alloc_frame();if(!old||!fresh)return false;auto*d=reinterpret_cast<uint8_t*>(fresh);auto*s=reinterpret_cast<const uint8_t*>(old);for(size_t j=0;j<memory::PAGE_SIZE;++j)d[j]=s[j];uint32_t flags=memory::VirtualMemoryManager::get_page_flags(&current_process->address_space,address);memory::VirtualMemoryManager::unmap_page(&current_process->address_space,address);if(!memory::VirtualMemoryManager::map_page(&current_process->address_space,address,fresh,flags|memory::PAGE_WRITABLE))return false;memory::PhysicalMemoryManager::free_frame(old);return true;}}
+    if (!current_process) return false;
+    address &= ~(memory::PAGE_SIZE - 1);
+    for (uint32_t i = 0; i < current_process->mapping_count; ++i) {
+        Mapping& mapping = current_process->mappings[i];
+        if (!mapping.cow || address < mapping.address || address >= mapping.address + mapping.length) continue;
+        const uintptr_t old = memory::VirtualMemoryManager::get_physical_address(
+            &current_process->address_space, address);
+        const uintptr_t fresh = memory::PhysicalMemoryManager::alloc_frame();
+        if (!old || !fresh) return false;
+        auto* destination = reinterpret_cast<uint8_t*>(fresh);
+        auto* source = reinterpret_cast<const uint8_t*>(old);
+        for (size_t j = 0; j < memory::PAGE_SIZE; ++j) destination[j] = source[j];
+        const uint32_t flags = memory::VirtualMemoryManager::get_page_flags(
+            &current_process->address_space, address);
+        if (!memory::VirtualMemoryManager::unmap_page(&current_process->address_space, address)) return false;
+        if (!memory::VirtualMemoryManager::map_page(&current_process->address_space, address,
+                                                     fresh, flags | memory::PAGE_WRITABLE)) return false;
+        memory::PhysicalMemoryManager::free_frame(old);
+        return true;
+    }
     return false;
 }
 
 int64_t Manager::self_test() {
-#if !defined(__x86_64__)
-    return -ERR_ENOSYS;
-#else
     if (current_process == nullptr) return -ERR_ENOMEM;
     Process* first_process = current_process;
     const int64_t first = mmap(0, memory::PAGE_SIZE, PROT_READ | PROT_WRITE, 0x22, -1, 0);
@@ -256,7 +275,6 @@ int64_t Manager::self_test() {
         munmap(static_cast<uintptr_t>(cow_address), memory::PAGE_SIZE) != 0) return -ERR_EINVAL;
     kernel::kprintf("[TEST][PASS] COW fork, write fault, exit, and wait/reap\n");
     return 0;
-#endif
 }
 
 bool Manager::activate(Process* process) {

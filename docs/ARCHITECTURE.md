@@ -1,7 +1,7 @@
 # Cross-Platform Freestanding C++ Kernel Architecture Specification
 
 ## 1. Overview & Objective
-This document specifies the architectural design, build pipeline, and boot abstractions for **Omega**, a freestanding Unix/Linux-like microkernel core written in C++20. The kernel is designed to cross-compile natively on macOS (Apple Silicon M1/M2/M3) using Clang and LLVM (`lld`) and target both **x86_64** (x64) and **AArch64** (ARM64) architectures.
+This document specifies the architectural design, build pipeline, and boot abstractions for **Omega**, a freestanding Unix/Linux-like microkernel core written in C++20. The kernel cross-compiles natively on macOS (Apple Silicon M1/M2/M3) using Clang and LLVM (`lld`) for **x86_64** (x64), **AArch64** (ARM64), and **RISC-V 64 (`rv64gc`)**.
 
 ---
 
@@ -157,6 +157,7 @@ brew install llvm cmake ninja qemu
 ### Compiler Target Triples
 * **x86_64**: `clang++ --target=x86_64-unknown-none-elf`
 * **AArch64**: `clang++ --target=aarch64-unknown-none-elf`
+* **RISC-V 64**: `clang++ --target=riscv64-unknown-none-elf`
 * **Linker**: `ld.lld` (LLVM linker from `brew --prefix llvm`/bin/ld.lld)
 
 ---
@@ -172,3 +173,11 @@ qemu-system-x86_64 -kernel build/x86_64/kernel.elf -serial stdio -display none
 ```bash
 qemu-system-aarch64 -machine virt -cpu cortex-a57 -nographic -kernel build/aarch64/kernel.elf
 ```
+
+### RISC-V 64 Target
+```bash
+qemu-system-riscv64 -machine virt -bios default -nographic -kernel build/riscv64/omega.elf
+```
+
+The userspace process ABI, initial stack layout, per-ISA address ranges, and
+static ELF/COW verification status are defined in [`ABI.md`](ABI.md).

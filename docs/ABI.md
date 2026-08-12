@@ -7,10 +7,11 @@ This specification defines the formal Application Binary Interface (ABI) of the 
 
 ## 1. System Call Architecture & Calling Conventions
 
-The register and instruction table below is the userspace syscall contract. The
-x86_64 reference path now installs `STAR`/`LSTAR`, enters Ring 3 with a real
-`iretq` frame, and returns through `sysretq`. AArch64 and RISC-V retain the
-dispatcher-only bring-up path until their native trap frames are implemented.
+The register and instruction table below is the userspace syscall contract.
+x86_64 enters Ring 3 with a real `iretq` frame and returns through `sysretq`.
+AArch64 enters EL0 through `eret` and handles lower-EL `svc` and fault frames.
+RISC-V enters U-mode through `sret` and handles direct-mode `ecall` and fault
+frames. The native `/init` paths are verified on all three reference ISAs.
 
 ### Register Passing Conventions Across Architectures
 
@@ -44,7 +45,7 @@ System calls return non-negative results on success and `-errno` on failure.
 | `SYS_MUNMAP` | `11` | `215` | `int munmap(void *addr, size_t len)` |
 | `SYS_BRK` | `12` | `214` | `int brk(void *addr)` |
 | `SYS_SCHED_YIELD` | `24` | `124` | `int sched_yield(void)` |
-| `SYS_FORK` | `57` | clone-based | `pid_t fork(void)` |
+| `SYS_FORK` | `57` | `220` (`clone`-compatible reservation) | `pid_t fork(void)` |
 | `SYS_EXECVE` | `59` | `221` | `int execve(const char *path, char *const argv[], char *const envp[])` |
 | `SYS_EXIT` | `60` | `93` | `void exit(int status)` |
 | `SYS_WAIT4` | `61` | `260` | `pid_t wait4(pid_t, int *, int, void *)` |
@@ -76,9 +77,14 @@ Linux-style negative-errno behavior is the contract; unsupported or
 architecture-dependent paths still fail explicitly until their full
 implementation milestones are complete.
 
-`fork`, `execve`, and `wait4` currently return `-ENOSYS` until copy-on-write,
-isolated ELF replacement, and process reaping are implemented. The former
-Omega numbers remain source-level compatibility aliases only.
+`fork`, `exit`, `wait4`, and page-granular COW fault recovery are verified by
+the process self-test on x86_64, AArch64, and RISC-V. Native entry,
+address-space mapping, static C startup, and process-exit handoff are also
+covered by the three-ISA integration tests. Scheduler-driven process switching
+and full multi-process signal semantics remain later work.
+`execve` still returns `-ENOSYS` because isolated ELF replacement is not
+implemented.
+The former Omega numbers remain source-level compatibility aliases only.
 
 ## 3. Linux Users, Groups, Roles, and File Permissions
 
@@ -120,10 +126,11 @@ through 15:
 
 ## 5. Virtual Address Space Layout & Privilege Boundaries
 
-Omega reserves separate kernel and user virtual-address regions. The x86_64
-process foundation currently creates isolated roots and dedicated user PML4
-slots. The x86_64 reference process has a hardware-enforced Ring 3 boundary;
-native AArch64 EL0 and RISC-V U-mode execution remain future work:
+Omega reserves separate kernel and user virtual-address regions. The process
+manager creates per-process roots and user mappings on all three reference
+ISAs. x86_64 uses dedicated user PML4 slots, AArch64 uses TTBR0 4 KiB-granule
+tables, and RISC-V uses Sv39. All three native `/init` paths have a
+hardware-enforced least-privilege boundary:
 
 ```text
 +-------------------------------------------------------+ 0xFFFFFFFFFFFFFFFF
@@ -140,16 +147,38 @@ native AArch64 EL0 and RISC-V U-mode execution remain future work:
 |                                                       |
 |  - User Stack (Top of Userland Space)                 |
 |  - Dynamic Heap / Mmap Region                         |
-|    Anonymous mmap bring-up base: 0x400000000000       |
+|    x86_64: 0x400000000000; AArch64: 0x4000000000;   |
+|    RISC-V: 0x40000000                                |
 |  - ELF BSS / Data Segments                            |
-|  - ELF Code Segment (.text - Base 0x400000)           |
+|  - ELF Code Segment (per-ISA fixed base)              |
 |                                                       |
 +-------------------------------------------------------+ 0x0000000000000000
 ```
 
 ---
 
-## 6. Primitive Data Types & Alignment Specifications
+## 6. Initial Process Stack ABI
+
+The kernel provides a Linux-shaped initial stack to every ELF process. The
+stack pointer is 16-byte aligned at process entry and points to this sequence:
+
+```text
+sp + 0x00: argc
+sp + 0x08: argv pointer
+sp + 0x10: envp pointer
+sp + 0x18: auxv pointer
+
+argv[]: argv[0] = "/init", NULL
+envp[]: NULL
+auxv[]: AT_NULL, 0
+```
+
+The current bootstrap uses a minimal environment and auxiliary vector. Future
+process creation will add documented `AT_*` entries without changing the
+leading four words. `crt0` must consume this layout rather than assuming host
+process startup conventions.
+
+## 7. Primitive Data Types & Alignment Specifications
 
 | Type | Bit Width | Byte Alignment | Architectural Representation |
 | :--- | :---: | :---: | :--- |
@@ -161,7 +190,7 @@ native AArch64 EL0 and RISC-V U-mode execution remain future work:
 | `pointer` (`void*`) | 64-bit | 8-byte | Unsigned 64-bit Virtual Address |
 | `size_t` | 64-bit | 8-byte | Unsigned 64-bit Byte Count |
 
-## 7. Omega SDK Linux Artifact ABI
+## 8. Omega SDK Linux Artifact ABI
 
 Omega consumes standard little-endian ELF64 artifacts for the matching
 architecture. Compatibility is defined at three different layers:
@@ -169,7 +198,7 @@ architecture. Compatibility is defined at three different layers:
 | Artifact | Compatibility contract | Current status |
 | :--- | :--- | :--- |
 | Static library (`.a`) | Archive members must be ELF relocatable objects for the target ISA, use the target Linux psABI, and expose C/C++ symbols that the Omega SDK linker can resolve. A host Linux `.a` is not executable by itself. | **Link-time compatible when rebuilt/linked with the Omega SDK** |
-| Executable (`ET_EXEC`/static `ET_DYN`) | ELF64, little-endian, matching `e_machine`, valid `PT_LOAD` ranges, no `PT_INTERP`, no unresolved dynamic metadata, and the Linux syscall/psABI contract above. | **x86_64 static ET_EXEC PT_LOAD mapping and Ring 3 execution implemented; broader process lifecycle pending** |
+| Executable (`ET_EXEC`/static `ET_DYN`) | ELF64, little-endian, matching `e_machine`, valid `PT_LOAD` ranges, no `PT_INTERP`, no unresolved dynamic metadata, and the Linux syscall/psABI contract above. | **Static ET_EXEC PT_LOAD mapping, Ring 3/EL0/U-mode execution, and page-granular process COW verified on all reference ISAs** |
 | Shared object (`ET_DYN`/`.so`) | Position-independent code, ELF relocations, symbol/version resolution, `DT_NEEDED` dependency loading, and an Omega dynamic linker/loader are required. | **Not runnable yet; ABI reserved and explicitly rejected by the current loader** |
 
 ### Static libraries
@@ -184,10 +213,10 @@ versions are not ABI-compatible with Omega.
 ### Executables
 
 The first supported binary interchange target is a statically linked ELF64
-executable rebuilt for the Omega SDK syscall ABI. x86_64 now maps validated
-`PT_LOAD` segments, creates a user stack, and enters a single PID 1 init from
-the Omega initrd. Relocations, auxiliary vectors, COW process creation,
-signals, and the AArch64/RISC-V native execution paths remain pending.
+executable rebuilt for the Omega SDK syscall ABI. All three reference ISAs now
+map validated `PT_LOAD` segments, create a user stack, and enter a single PID 1
+init from the Omega initrd. Relocations beyond static link-time resolution,
+auxiliary vectors beyond `AT_NULL`, and signals remain pending.
 
 ### Shared objects and dynamic linking
 

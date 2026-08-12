@@ -129,6 +129,7 @@ static uint64_t arm_leaf_attrs(uint32_t flags) {
     attrs |= (flags & PAGE_WRITABLE) ? (1ull << 6) : (3ull << 6);
     return attrs;
 }
+static constexpr uint64_t ARM_PHYS_MASK = 0x0000fffffffff000ull;
 #endif
 
 #if defined(__riscv)
@@ -307,6 +308,9 @@ bool VirtualMemoryManager::map_page(AddressSpace* space, uintptr_t virt_addr,
         return false;
     }
     table[indexes[3]] = phys_addr | leaf_flags(flags);
+    if ((space->root & X86_ADDR_MASK) == (current_pml4_or_ttbr & X86_ADDR_MASK)) {
+        asm volatile("invlpg (%0)" : : "r"(virt_addr) : "memory");
+    }
     return true;
 #else
 #if defined(__aarch64__)
@@ -415,8 +419,8 @@ uintptr_t VirtualMemoryManager::get_physical_address(const AddressSpace* space, 
 #else
 #if defined(__aarch64__)
     if (!space || !space->valid) return 0; auto page=virt_addr&~(PAGE_SIZE-1); auto* l0=reinterpret_cast<uint64_t*>(space->root); uint32_t i0=(page>>39)&511,i1=(page>>30)&511,i2=(page>>21)&511,i3=(page>>12)&511;
-    if (!(l0[i0]&ARM_VALID)) return 0; auto* l1=reinterpret_cast<uint64_t*>(l0[i0]&~3ull); if (!(l1[i1]&ARM_VALID)) return 0; if (!(l1[i1]&ARM_TABLE)) return (l1[i1]&~0x1fffffull)|(virt_addr&0x3fffffff);
-    auto* l2=reinterpret_cast<uint64_t*>(l1[i1]&~3ull); if (!(l2[i2]&ARM_VALID)) return 0; if (!(l2[i2]&ARM_TABLE)) return (l2[i2]&~0x1fffffull)|(virt_addr&0x1fffff); auto* l3=reinterpret_cast<uint64_t*>(l2[i2]&~3ull); return (l3[i3]&~0xfffull)|(virt_addr&0xfff);
+    if (!(l0[i0]&ARM_VALID)) return 0; auto* l1=reinterpret_cast<uint64_t*>(l0[i0]&~3ull); if (!(l1[i1]&ARM_VALID)) return 0; if (!(l1[i1]&ARM_TABLE)) return (l1[i1]&0x0000ffffc0000000ull)|(virt_addr&0x3fffffff);
+    auto* l2=reinterpret_cast<uint64_t*>(l1[i1]&~3ull); if (!(l2[i2]&ARM_VALID)) return 0; if (!(l2[i2]&ARM_TABLE)) return (l2[i2]&0x0000ffffffe00000ull)|(virt_addr&0x1fffff); auto* l3=reinterpret_cast<uint64_t*>(l2[i2]&~3ull); return (l3[i3]&ARM_PHYS_MASK)|(virt_addr&0xfff);
 #elif defined(__riscv)
     if (!space || !space->valid) return 0; auto page=virt_addr&~(PAGE_SIZE-1); auto* l2=reinterpret_cast<uint64_t*>(space->root); uint32_t i2=(page>>30)&511,i1=(page>>21)&511,i0=(page>>12)&511; if (!(l2[i2]&RV_V)) return 0; if (l2[i2]&(RV_R|RV_W|RV_X)) return ((l2[i2]>>10)<<12)|(virt_addr&0x3fffffff); auto* l1=reinterpret_cast<uint64_t*>((l2[i2]>>10)<<12); if (!(l1[i1]&RV_V)) return 0; if (l1[i1]&(RV_R|RV_W|RV_X)) return ((l1[i1]>>10)<<12)|(virt_addr&0x1fffff); auto* l0=reinterpret_cast<uint64_t*>((l1[i1]>>10)<<12); return (l0[i0]&~0x3ffull)<<2 | (virt_addr&0xfff);
 #else
@@ -433,6 +437,40 @@ uint32_t VirtualMemoryManager::get_page_flags(const AddressSpace* space, uintptr
     const uint32_t ix[4] = {static_cast<uint32_t>((virt_addr>>39)&511), static_cast<uint32_t>((virt_addr>>30)&511), static_cast<uint32_t>((virt_addr>>21)&511), static_cast<uint32_t>((virt_addr>>12)&511)};
     for (int level=0; level<3; ++level) { uint64_t e=table[ix[level]]; if (!(e&X86_PRESENT) || (e&X86_HUGE)) return 0; table=x86_table(e); }
     const uint64_t e=table[ix[3]]; if (!(e&X86_PRESENT)) return 0; uint32_t f=PAGE_PRESENT; if(e&X86_WRITABLE)f|=PAGE_WRITABLE; if(e&X86_USER)f|=PAGE_USER; if(!(e&X86_NX))f|=PAGE_EXEC; return f;
+#elif defined(__aarch64__)
+    if (!space || !space->valid) return 0;
+    auto* l0 = reinterpret_cast<uint64_t*>(space->root);
+    const uint32_t i0 = (virt_addr >> 39) & 511, i1 = (virt_addr >> 30) & 511,
+                   i2 = (virt_addr >> 21) & 511, i3 = (virt_addr >> 12) & 511;
+    if (!(l0[i0] & ARM_VALID)) return 0;
+    auto* l1 = reinterpret_cast<uint64_t*>(l0[i0] & ~3ull);
+    if (!(l1[i1] & ARM_VALID) || !(l1[i1] & ARM_TABLE)) return 0;
+    auto* l2 = reinterpret_cast<uint64_t*>(l1[i1] & ~3ull);
+    if (!(l2[i2] & ARM_VALID) || !(l2[i2] & ARM_TABLE)) return 0;
+    auto* l3 = reinterpret_cast<uint64_t*>(l2[i2] & ~3ull);
+    const uint64_t entry = l3[i3];
+    if (!(entry & ARM_VALID)) return 0;
+    uint32_t flags = PAGE_PRESENT | PAGE_USER;
+    const uint64_t ap = (entry >> 6) & 3;
+    if (ap == 1) flags |= PAGE_WRITABLE;
+    if (!(entry & ARM_XN)) flags |= PAGE_EXEC;
+    return flags;
+#elif defined(__riscv)
+    if (!space || !space->valid) return 0;
+    auto* l2 = reinterpret_cast<uint64_t*>(space->root);
+    const uint32_t i2 = (virt_addr >> 30) & 511, i1 = (virt_addr >> 21) & 511,
+                   i0 = (virt_addr >> 12) & 511;
+    if (!(l2[i2] & RV_V) || (l2[i2] & (RV_R | RV_W | RV_X))) return 0;
+    auto* l1 = reinterpret_cast<uint64_t*>((l2[i2] >> 10) << 12);
+    if (!(l1[i1] & RV_V) || (l1[i1] & (RV_R | RV_W | RV_X))) return 0;
+    auto* l0 = reinterpret_cast<uint64_t*>((l1[i1] >> 10) << 12);
+    const uint64_t entry = l0[i0];
+    if (!(entry & RV_V)) return 0;
+    uint32_t flags = PAGE_PRESENT;
+    if (entry & RV_U) flags |= PAGE_USER;
+    if (entry & RV_W) flags |= PAGE_WRITABLE;
+    if (entry & RV_X) flags |= PAGE_EXEC;
+    return flags;
 #else
     (void)space; (void)virt_addr; return 0;
 #endif
@@ -442,6 +480,34 @@ bool VirtualMemoryManager::set_page_flags(AddressSpace* space, uintptr_t virt_ad
 #if defined(__x86_64__)
     if (!space || !space->valid) return false; auto* table=x86_table(space->root); const uint32_t ix[4]={static_cast<uint32_t>((virt_addr>>39)&511),static_cast<uint32_t>((virt_addr>>30)&511),static_cast<uint32_t>((virt_addr>>21)&511),static_cast<uint32_t>((virt_addr>>12)&511)};
     for(int level=0;level<3;++level){uint64_t e=table[ix[level]];if(!(e&X86_PRESENT)||(e&X86_HUGE))return false;table=x86_table(e);} uint64_t& e=table[ix[3]];if(!(e&X86_PRESENT))return false; const uintptr_t phys=e&X86_ADDR_MASK; e=phys|leaf_flags(flags); if((space->root&X86_ADDR_MASK)==(current_pml4_or_ttbr&X86_ADDR_MASK))asm volatile("invlpg (%0)"::"r"(virt_addr):"memory"); return true;
+#elif defined(__aarch64__)
+    if (!space || !space->valid) return false;
+    auto* l0 = reinterpret_cast<uint64_t*>(space->root);
+    const uint32_t i0 = (virt_addr >> 39) & 511, i1 = (virt_addr >> 30) & 511,
+                   i2 = (virt_addr >> 21) & 511, i3 = (virt_addr >> 12) & 511;
+    if (!(l0[i0] & ARM_VALID)) return false;
+    auto* l1 = reinterpret_cast<uint64_t*>(l0[i0] & ~3ull);
+    if (!(l1[i1] & ARM_VALID) || !(l1[i1] & ARM_TABLE)) return false;
+    auto* l2 = reinterpret_cast<uint64_t*>(l1[i1] & ~3ull);
+    if (!(l2[i2] & ARM_VALID) || !(l2[i2] & ARM_TABLE)) return false;
+    auto* l3 = reinterpret_cast<uint64_t*>(l2[i2] & ~3ull);
+    if (!(l3[i3] & ARM_VALID)) return false;
+    l3[i3] = (l3[i3] & ~((3ull << 6) | ARM_XN)) | arm_leaf_attrs(flags);
+    asm volatile("dsb ish; tlbi vae1is, %0; dsb ish; isb" : : "r"(virt_addr >> 12) : "memory");
+    return true;
+#elif defined(__riscv)
+    if (!space || !space->valid) return false;
+    auto* l2 = reinterpret_cast<uint64_t*>(space->root);
+    const uint32_t i2 = (virt_addr >> 30) & 511, i1 = (virt_addr >> 21) & 511,
+                   i0 = (virt_addr >> 12) & 511;
+    if (!(l2[i2] & RV_V) || (l2[i2] & (RV_R | RV_W | RV_X))) return false;
+    auto* l1 = reinterpret_cast<uint64_t*>((l2[i2] >> 10) << 12);
+    if (!(l1[i1] & RV_V) || (l1[i1] & (RV_R | RV_W | RV_X))) return false;
+    auto* l0 = reinterpret_cast<uint64_t*>((l1[i1] >> 10) << 12);
+    if (!(l0[i0] & RV_V)) return false;
+    l0[i0] = (l0[i0] & ~((RV_R | RV_W | RV_X | RV_U) | RV_A | RV_D)) | rv_flags(flags);
+    asm volatile("sfence.vma %0" : : "r"(virt_addr) : "memory");
+    return true;
 #else
     (void)space; (void)virt_addr; (void)flags; return false;
 #endif
