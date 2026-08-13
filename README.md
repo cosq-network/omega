@@ -162,13 +162,20 @@ isolated with `OMEGA_BUILD_ROOT` and `OMEGA_IMAGE_ROOT`.
 | :--- | :--- |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Kernel architecture and subsystem boundaries |
 | [`docs/ABI.md`](docs/ABI.md) | System call and userspace ABI |
+| [`docs/COMMUNICATIONS_INTEGRATION_PLAN.md`](docs/COMMUNICATIONS_INTEGRATION_PLAN.md) | Communications Integration Plan |
+| [`docs/COMPLETION_REPORT.md`](docs/COMPLETION_REPORT.md) | Final Verification Report |
+| [`docs/FIRMWARE_BOOT.md`](docs/FIRMWARE_BOOT.md) | Firmware and bootloader compatibility |
+| [`docs/OMEGA_SDK_PLAN.md`](docs/OMEGA_SDK_PLAN.md) | Future lightweight userspace SDK |
+| [`docs/OVD_REAL_DEVICE_PROFILE_PLAN.md`](docs/OVD_REAL_DEVICE_PROFILE_PLAN.md) | OVD profile registry and artifact plan |
+| [`docs/POINTING_DEVICES_INTEGRATION_PLAN.md`](docs/POINTING_DEVICES_INTEGRATION_PLAN.md) | Pointing Devices Integration Plan |
+| [`docs/REAL_HARDWARE_VALIDATION_MATRIX.md`](docs/REAL_HARDWARE_VALIDATION_MATRIX.md) | Real Hardware Validation Matrix |
+| [`docs/RISCV64_PLAN.md`](docs/RISCV64_PLAN.md) | RISC-V 64 Architectural Plan |
 | [`docs/ROADMAP.md`](docs/ROADMAP.md) | Current milestones and remaining work |
 | [`docs/RUNNING.md`](docs/RUNNING.md) | Build and QEMU execution guide |
-| [`docs/FIRMWARE_BOOT.md`](docs/FIRMWARE_BOOT.md) | Firmware and bootloader compatibility |
 | [`docs/STORAGE_ARCHITECTURE_PLAN.md`](docs/STORAGE_ARCHITECTURE_PLAN.md) | Storage architecture and driver roadmap |
+| [`docs/SUMMARY.md`](docs/SUMMARY.md) | Project Summary |
 | [`docs/VGA_DISPLAY_PLAN.md`](docs/VGA_DISPLAY_PLAN.md) | x86_64 display implementation |
 | [`docs/DISPLAY_AARCH64_RISCV_PLAN.md`](docs/DISPLAY_AARCH64_RISCV_PLAN.md) | AArch64 and RISC-V display implementation |
-| [`docs/OMEGA_SDK_PLAN.md`](docs/OMEGA_SDK_PLAN.md) | Future lightweight userspace SDK |
 | [`scripts/README.md`](scripts/README.md) | Script catalog and verification workflow |
 
 ---
@@ -192,29 +199,35 @@ omega/
 ├── docs/
 │   ├── ARCHITECTURE.md            # Architectural Specification
 │   ├── ABI.md                     # System Call ABI Specification
-│   ├── OMEGA_SDK_PLAN.md          # Lightweight C/C++ SDK and Linux artifact ABI plan
+│   ├── COMMUNICATIONS_INTEGRATION_PLAN.md # Communications Integration Plan
+│   ├── COMPLETION_REPORT.md       # Final Verification Report
+│   ├── DISPLAY_AARCH64_RISCV_PLAN.md  # SDM — AArch64/RISC-V extension (Phase 7.2b)
 │   ├── FIRMWARE_BOOT.md           # U-Boot & Coreboot Firmware Compatibility
+│   ├── OMEGA_SDK_PLAN.md          # Lightweight C/C++ SDK and Linux artifact ABI plan
+│   ├── OVD_REAL_DEVICE_PROFILE_PLAN.md # OVD profile registry and artifact plan
+│   ├── POINTING_DEVICES_INTEGRATION_PLAN.md # Pointing Devices Integration Plan
+│   ├── REAL_HARDWARE_VALIDATION_MATRIX.md # Real Hardware Validation Matrix
 │   ├── RISCV64_PLAN.md            # RISC-V 64 Architectural Plan
 │   ├── ROADMAP.md                 # Multi-Phase Implementation Roadmap
 │   ├── RUNNING.md                 # QEMU Execution & Build Guide
-│   ├── VGA_DISPLAY_PLAN.md        # SDM — x86_64 Standard VGA (Phase 7.2)
-│   ├── DISPLAY_AARCH64_RISCV_PLAN.md  # SDM — AArch64/RISC-V extension (Phase 7.2b)
 │   ├── STORAGE_ARCHITECTURE_PLAN.md   # Cross-architecture storage architecture
-│   ├── OVD_REAL_DEVICE_PROFILE_PLAN.md # OVD profile registry and artifact plan
-│   └── COMPLETION_REPORT.md       # Final Verification Report
+│   ├── SUMMARY.md                 # Project Summary
+│   └── VGA_DISPLAY_PLAN.md        # SDM — x86_64 Standard VGA (Phase 7.2)
 ├── emulator/
 │   ├── README.md                  # OVD manager, profiles, GUI, and tests
 │   ├── profiles/                  # Canonical predefined OVD profile catalog
+│   ├── ovd/                       # OVD Subdirectory
 │   ├── profile_catalog.py         # Profile validation, rendering, artifacts
 │   ├── ovd_core.py                # Cross-platform manager, profiles, lifecycle, QEMU backend
 │   ├── ovd_cli.py                 # Python CLI
 │   ├── ovd_manager.py             # Python manager entry point
 │   ├── ovd_run.py                 # Python launcher entry point
 │   ├── ovd_gui.py                 # Built-in tkinter GUI
-│   ├── profile_catalog.py          # Python-compatible profile catalog entry point
+│   ├── ovd_vnc.py                 # Built-in Tkinter VNC viewer
 │   ├── test_ovd_unit.py           # Python OVD manager unit tests
 │   ├── test_profile_catalog.py    # Python profile tests
-│   └── test_profile_ext4_integration.py # Python ext4 profile policy tests
+│   ├── test_profile_ext4_integration.py # Python ext4 profile policy tests
+│   └── test_vnc.py                # VNC tests
 ├── scripts/
 │   ├── README.md                  # Script catalog, usage, and verification guide
 │   ├── create_bootable_disk.sh    # Configurable multi-arch boot image generator
@@ -242,6 +255,7 @@ omega/
 │   ├── test_sdk_manifest.sh        # SDK manifest integrity test
 │   ├── test_scripts_unit.py       # Python launcher and emulator unit-test entry point
 │   └── test_disk_images.sh        # Disk Image Verification Test Suite
+├── tests/                         # C++ unit tests for kernel components
 ├── kernel/
     ├── arch/
     │   ├── x86_64/                # Boot, serial, idt, pci, VGA/display, linker.ld
