@@ -158,7 +158,8 @@ void VirtualMemoryManager::init() {
     asm volatile("mrs %0, ttbr0_el1" : "=r"(current_pml4_or_ttbr));
 #elif defined(__riscv)
     rv_setup();
-    asm volatile("csrr %0, satp" : "=r"(current_pml4_or_ttbr));
+    current_pml4_or_ttbr = (8ull << 60) | (reinterpret_cast<uintptr_t>(&rv_root[0]) >> 12);
+    asm volatile("csrw satp, %0; sfence.vma" : : "r"(current_pml4_or_ttbr) : "memory");
 #endif
     kernel::kprintf("[+] Virtual Memory Manager (VMM) initialized.\n");
 }
@@ -173,7 +174,7 @@ bool VirtualMemoryManager::map_page(uintptr_t virt_addr, uintptr_t phys_addr, ui
     AddressSpace current{current_pml4_or_ttbr, true};
     return map_page(&current, virt_addr, phys_addr, flags);
 #elif defined(__riscv)
-    AddressSpace current{current_pml4_or_ttbr, true};
+    kernel::kprintf("[DEBUG] current_pml4_or_ttbr=%x\n", current_pml4_or_ttbr); AddressSpace current{(current_pml4_or_ttbr & 0x00000fffffffffULL) << 12, true};
     return map_page(&current, virt_addr, phys_addr, flags);
 #else
     (void)flags;
@@ -186,6 +187,9 @@ bool VirtualMemoryManager::unmap_page(uintptr_t virt_addr) {
 #if defined(__x86_64__)
     AddressSpace current{current_pml4_or_ttbr & X86_ADDR_MASK, true};
     return unmap_page(&current, virt_addr);
+#elif defined(__riscv)
+    kernel::kprintf("[DEBUG] current_pml4_or_ttbr=%x\n", current_pml4_or_ttbr); AddressSpace current{(current_pml4_or_ttbr & 0x00000fffffffffULL) << 12, true};
+    return unmap_page(&current, virt_addr);
 #else
     AddressSpace current{current_pml4_or_ttbr, true};
     return unmap_page(&current, virt_addr);
@@ -195,6 +199,9 @@ bool VirtualMemoryManager::unmap_page(uintptr_t virt_addr) {
 uintptr_t VirtualMemoryManager::get_physical_address(uintptr_t virt_addr) {
 #if defined(__x86_64__)
     AddressSpace current{current_pml4_or_ttbr & X86_ADDR_MASK, true};
+    return get_physical_address(&current, virt_addr);
+#elif defined(__riscv)
+    kernel::kprintf("[DEBUG] current_pml4_or_ttbr=%x\n", current_pml4_or_ttbr); AddressSpace current{(current_pml4_or_ttbr & 0x00000fffffffffULL) << 12, true};
     return get_physical_address(&current, virt_addr);
 #else
     AddressSpace current{current_pml4_or_ttbr, true};

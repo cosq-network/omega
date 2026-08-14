@@ -102,18 +102,18 @@ static const uint8_t mock_elf_binary[] __attribute__((aligned(8))) = {
 };
 
 extern "C" void kernel_main(uintptr_t boot_fdt) {
-    fdt::set_boot_pointer(boot_fdt);
     // Serial first for early trap/debug output before display is ready.
     hal::uart_init();
 #if defined(__aarch64__)
     // Some direct AArch64 QEMU loaders do not populate x0. Search the reserved
     // low-RAM handoff window, accepting only a structurally valid DTB.
     if (boot_fdt == 0) {
-        for (uintptr_t candidate = 0x40000000ull; candidate < 0x48000000ull; candidate += 0x1000) {
+        for (uintptr_t candidate = 0x40000000ull; candidate < 0x48000000ull; candidate += 8) {
             if (fdt::is_valid_blob(candidate)) { boot_fdt = candidate; break; }
         }
     }
 #endif
+    fdt::set_boot_pointer(boot_fdt);
 
     // PMM/VMM must be ready before framebuffer mapping (may lie above 1 GiB).
     // The early RISC-V/AArch64 QEMU handoff does not yet establish a broad

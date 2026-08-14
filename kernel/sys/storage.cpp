@@ -1,6 +1,8 @@
 #include "kernel/storage.hpp"
 #include "kernel/dma.hpp"
 #include "kernel/kprint.hpp"
+#include "kernel/ahci.hpp"
+#include "kernel/nvme.hpp"
 
 namespace storage {
 namespace {
@@ -60,6 +62,8 @@ void Manager::init() {
     next_id = 1;
     initialized = true;
     dma::init();
+    ahci::init();
+    nvme::init();
     kernel::kprintf("[+] Storage core initialized.\n");
 }
 

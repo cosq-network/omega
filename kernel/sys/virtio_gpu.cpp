@@ -60,8 +60,7 @@ struct QueueMemory {
     UsedElem used_ring[GPU_QUEUE_SIZE];
     uint16_t used_avail_event;
     // Legacy VirtIO places the device ring on the next page boundary.
-    uint8_t legacy_padding[4096 - 222];
-    uint16_t legacy_used_flags;
+    alignas(4096) uint16_t legacy_used_flags;
     uint16_t legacy_used_idx;
     UsedElem legacy_used_ring[GPU_QUEUE_SIZE];
     uint16_t legacy_used_avail_event;
@@ -106,12 +105,14 @@ static void dma_barrier() {
 static bool setup_queue() {
     write(MMIO_QUEUE_SEL, 0);
     uint32_t max = read(MMIO_QUEUE_NUM_MAX);
-    if (max < 2) return false;
+    if (max < 2) { kernel::kprintf("[DEBUG] queue max < 2\n"); return false; }
     queue_size = GPU_QUEUE_SIZE < max ? GPU_QUEUE_SIZE : max;
     write(MMIO_QUEUE_NUM, queue_size);
     zero(&queue, sizeof(queue));
     const uintptr_t q = reinterpret_cast<uintptr_t>(&queue);
     if (mmio_version == 1) {
+        write(0x028 /* GUEST_PAGE_SIZE */, 4096);
+        write(0x03C /* QUEUE_ALIGN */, 4096);
         write(MMIO_QUEUE_PFN, static_cast<uint32_t>(q >> 12));
     } else {
         write(MMIO_QUEUE_DESC_LOW, static_cast<uint32_t>(q));
@@ -137,7 +138,8 @@ static bool submit(void* request, uint32_t request_len, void* reply, uint32_t re
     ++queue.avail_idx;
     dma_barrier();
     write(MMIO_QUEUE_NOTIFY, 0);
-    for (uint32_t spins = 0; spins < 1000; ++spins) {
+    for (uint32_t spins = 0; spins < 10000000; ++spins) {
+        (void)read(MMIO_STATUS);
         dma_barrier();
         if (used_index() == expected_used) return true;
     }
@@ -149,7 +151,6 @@ static bool command_ok(uint32_t response_type) { return response_type == GPU_RES
 [[maybe_unused]] static bool probe_base(uintptr_t base) {
     if (base == 0) return false;
     mmio_base = base;
-    if (!memory::VirtualMemoryManager::map_page(mmio_base, mmio_base, memory::PAGE_PRESENT | memory::PAGE_WRITABLE | memory::PAGE_DEVICE)) return false;
     if (read(MMIO_MAGIC) != 0x74726976u || read(MMIO_DEVICE_ID) != GPU_DEVICE_ID) return false;
     mmio_version = read(MMIO_VERSION);
     write(MMIO_STATUS, 0);

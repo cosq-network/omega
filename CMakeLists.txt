@@ -53,6 +53,8 @@ set(KERNEL_SOURCES
     kernel/sys/memory_block.cpp
     kernel/sys/partition.cpp
     kernel/sys/virtio_blk.cpp
+    kernel/sys/ahci.cpp
+    kernel/sys/nvme.cpp
     kernel/sys/userland.cpp
     kernel/sys/elf_loader.cpp
     kernel/sys/net.cpp
@@ -119,9 +121,7 @@ add_library(kernel_objs OBJECT ${KERNEL_SOURCES})
 if(ENABLE_EXPERIMENTAL_VIRTIO_GPU)
     target_compile_definitions(kernel_objs PRIVATE OMEGA_ENABLE_EXPERIMENTAL_VIRTIO_GPU=1)
 endif()
-if(ENABLE_EXPERIMENTAL_VIRTIO_BLOCK)
-    target_compile_definitions(kernel_objs PRIVATE OMEGA_ENABLE_EXPERIMENTAL_VIRTIO_BLOCK=1)
-endif()
+
 if(ENABLE_SCHEDULER_SELF_TEST)
     target_compile_definitions(kernel_objs PRIVATE OMEGA_ENABLE_SCHEDULER_SELF_TEST=1)
 endif()

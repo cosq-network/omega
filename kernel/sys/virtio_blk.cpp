@@ -411,9 +411,6 @@ static storage::Device device{
 }
 
 bool init() {
-#if !defined(OMEGA_ENABLE_EXPERIMENTAL_VIRTIO_BLOCK)
-    return false;
-#else
 #if defined(__x86_64__)
     if (probe_legacy_pci()) {
         kernel::kprintf("[+] VirtIO-Block PCI runtime completion enabled.\n");
@@ -424,7 +421,9 @@ bool init() {
     bool fdt_device_seen = false;
     for (uint32_t ordinal = 0; ordinal < 16; ++ordinal) {
         fdt::VirtioMmioDevice found{};
-        if (!fdt::find_virtio_mmio(&found, ordinal)) break;
+        if (!fdt::find_virtio_mmio(&found, ordinal)) {
+            break;
+        }
         fdt_device_seen = true;
         if (probe(found.phys_addr)) {
             kernel::kprintf("[+] VirtIO-Block storage device initialized.\n");
@@ -432,7 +431,7 @@ bool init() {
             return true;
         }
     }
-    if (!fdt_device_seen && fdt::boot_pointer()) {
+    if (!fdt_device_seen) {
         const uintptr_t mmio_bases[] = {
             0x0A000000ull,
         };
@@ -448,7 +447,6 @@ bool init() {
         }
     }
     return false;
-#endif
 }
 
 } // namespace virtio_blk

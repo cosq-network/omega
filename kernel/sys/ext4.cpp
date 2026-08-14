@@ -1,5 +1,6 @@
 #include "kernel/ext4.hpp"
 #include "kernel/heap.hpp"
+#include "kernel/partition.hpp"
 #include "kernel/kprint.hpp"
 
 namespace ext4 {
@@ -14,6 +15,7 @@ static constexpr uint32_t EXT4_EXTENTS = 0x00080000;
 
 struct Fs {
     storage::Device* device;
+    uint64_t partition_offset;
     uint32_t block_size;
     uint32_t blocks_per_group;
     uint32_t inodes_per_group;
@@ -44,7 +46,7 @@ static void copy_bytes(void* dst, const void* src, size_t count) { auto* d = rei
 static bool equal_name(const char* a, const char* b) { size_t i = 0; while (a[i] && b[i] && a[i] == b[i]) ++i; return a[i] == '\0' && b[i] == '\0'; }
 
 static bool io(Fs* fs, storage::RequestType type, uint64_t lba, uint32_t count, void* buffer) {
-    storage::Request request{type, lba, count, buffer, 0, nullptr, nullptr};
+    storage::Request request{type, fs->partition_offset + lba, count, buffer, 0, nullptr, nullptr};
     return storage::Manager::submit_sync(fs->device, &request) == storage::Status::Success;
 }
 static bool valid_block(const Fs* fs, uint64_t block) {
@@ -59,7 +61,7 @@ static bool read_bytes(Fs* fs, uint64_t byte_offset, uint32_t bytes, void* buffe
 }
 static bool write_bytes(Fs* fs, uint64_t byte_offset, uint32_t bytes, const void* buffer) {
     if ((byte_offset & 511u) || (bytes & 511u) || (fs->readonly)) return false;
-    storage::Request request{storage::RequestType::Write, byte_offset / 512u, bytes / 512u, const_cast<void*>(buffer), 0, nullptr, nullptr};
+    storage::Request request{storage::RequestType::Write, fs->partition_offset + byte_offset / 512u, bytes / 512u, const_cast<void*>(buffer), 0, nullptr, nullptr};
     return storage::Manager::submit_sync(fs->device, &request) == storage::Status::Success;
 }
 static bool read_block(Fs* fs, uint64_t block, void* buffer) {
@@ -212,8 +214,30 @@ storage::Status mount(storage::Device* device, vfs::VfsNode** root) {
     if (!device || device->geometry.logical_block_size != 512) return storage::Status::InvalidRequest;
     auto* fs = reinterpret_cast<Fs*>(kmalloc(sizeof(Fs))); if (!fs) return storage::Status::IoError;
     fs->device = device; fs->readonly = (device->flags & storage::DEVICE_READ_ONLY) != 0;
+    fs->partition_offset = 0;
+
     alignas(4096) uint8_t super[4096]{};
-    if (!read_bytes(fs, 1024, 1024, super) || le16(super + 0x38) != EXT4_MAGIC) return storage::Status::ProtocolError;
+    bool found_superblock = false;
+
+    storage::partition::Table table{};
+    if (storage::partition::scan(device, &table) == storage::Status::Success && table.valid) {
+        for (uint32_t i = 0; i < table.count; ++i) {
+            fs->partition_offset = table.entries[i].first_lba;
+            if (read_bytes(fs, 1024, 1024, super) && le16(super + 0x38) == EXT4_MAGIC) {
+                found_superblock = true;
+                break;
+            }
+        }
+    }
+
+    if (!found_superblock) {
+        fs->partition_offset = 0;
+        if (read_bytes(fs, 1024, 1024, super) && le16(super + 0x38) == EXT4_MAGIC) {
+            found_superblock = true;
+        }
+    }
+
+    if (!found_superblock) return storage::Status::ProtocolError;
     const uint32_t log = le32(super + 0x18); if (log > 2) return storage::Status::Unsupported;
     fs->block_size = 1024u << log; fs->blocks_per_group = le32(super + 0x20); fs->inodes_per_group = le32(super + 0x28);
     fs->inode_size = le16(super + 0x58); if (fs->inode_size < 128 || fs->inode_size > fs->block_size || fs->block_size % fs->inode_size) return storage::Status::ProtocolError;

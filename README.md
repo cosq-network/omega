@@ -52,7 +52,7 @@
 - **VirtIO Network Stack**: VirtIO-Net packet reader, Ethernet L2, IPv4 L3, and UDP/TCP L4 stack headers.
 - **System Display Module (x86_64 Standard VGA)**: Layered display HAL with VGA text mode (80×25 at `0xB8000`), Bochs VBE linear framebuffer (1024×768×32 via DISPI), Multiboot2 framebuffer handoff, 8×16 bitmap font, and a kernel graphical console. `kprintf` output is mirrored to serial (COM1) and the active display backend concurrently.
 - **AArch64/RISC-V Display Integration**: Shared FDT walker and validated framebuffer metadata, format-aware portable framebuffer rendering, identity-map safety bounds, serial fallback, and an opt-in VirtIO-GPU MMIO 2D bring-up path with bounded failure behavior.
-- **Cross-Architecture Storage Foundation**: Common block requests, device lifecycle and driver registration, DMA mapping, GPT/MBR parsing, writable/read-only policy, flush/barrier handling, and a synthetic block backend verified on x86_64, AArch64, and RISC-V.
+- **Cross-Architecture Storage Foundation**: Common block requests, device lifecycle and driver registration, DMA mapping, GPT/MBR parsing, ext4 filesystem mounting via partition offset, writable/read-only policy, flush/barrier handling, and a synthetic block backend verified on x86_64, AArch64, and RISC-V.
 - **VirtIO-Block Path**: Opt-in x86_64 transitional VirtIO-PCI discovery with legacy queue geometry, feature negotiation, and verified read/write/flush completion; AArch64/RISC-V VirtIO-MMIO remains experimental. Enable with `-DENABLE_EXPERIMENTAL_VIRTIO_BLOCK=ON`.
 - **Firmware & Bootloader Compatibility**: Compatible with **UEFI/GPT**, **U-Boot** (`bootefi` / `booti`), and **Coreboot** (TianoCore / GRUB).
 - **Multi-Format Virtual Disk Image Generator**: Generates RAW (`.img`), QCOW2 (`.qcow2`), VMDK (`.vmdk`), and VDI (`.vdi`) disk images with embedded FAT32 payloads (`/EFI/BOOT/` and `/boot/omega.elf`).
@@ -74,7 +74,7 @@ The native `/init` path and page-granular COW fork, write-fault, exit, and wait/
 | Processes | Per-process roots, user mappings, and COW lifecycle verification on all ISAs |
 | Security | Linux-style credentials, groups, ownership, mode checks, DAC rules, and umask foundations |
 | Filesystems | VFS node tree and initrd RAM disk with permission-aware access checks |
-| Storage | Common block API, DMA abstraction, GPT/MBR parsing, synthetic backend, experimental VirtIO-Block |
+| Storage | Common block API, DMA abstraction, GPT/MBR parsing, ext4 mounting, synthetic backend, experimental VirtIO-Block |
 | Networking | VirtIO-Net, Ethernet, IPv4, UDP, and TCP foundations |
 | Input | Versioned input ABI, keyboard and mouse events, HID boot reports, PS/2 backend, portable adapters |
 | Display | x86_64 VGA and Bochs VBE, SimpleFb on AArch64 and RISC-V, serial fallback, Omega boot logo |
@@ -113,7 +113,7 @@ perform `SYS_write` and `SYS_exit` through x86_64 `syscall`/`sysretq`, AArch64
 `fork`, write-fault isolation, exit, and wait/reap. Full libc, signals,
 architecture-neutral process switching, and dynamic linking remain future work.
 
-**Storage:** The architecture and initial implementation are specified in [`docs/STORAGE_ARCHITECTURE_PLAN.md`](docs/STORAGE_ARCHITECTURE_PLAN.md). The common layer is implemented and tested; GPT/MBR parsing, synthetic writes/flushes, and guarded VirtIO-Block request paths are available. NVMe, AHCI/SATA/ATAPI, SDHCI, USB Mass Storage, filesystem mounting, and hardware-specific writes remain subsequent milestones.
+**Storage:** The architecture and initial implementation are specified in [`docs/STORAGE_ARCHITECTURE_PLAN.md`](docs/STORAGE_ARCHITECTURE_PLAN.md). The common layer is implemented and tested; GPT/MBR parsing, ext4 mounting, synthetic writes/flushes, and guarded VirtIO-Block request paths are available. NVMe, AHCI/SATA/ATAPI, SDHCI, USB Mass Storage, and hardware-specific writes remain subsequent milestones.
 
 | Layer | Location | Role |
 | :--- | :--- | :--- |

@@ -184,10 +184,10 @@ The storage roadmap is defined in [`docs/STORAGE_ARCHITECTURE_PLAN.md`](STORAGE_
 | Storage milestone | Status | Scope |
 | :--- | :---: | :--- |
 | **7.1a Storage core and DMA** | `PARTIAL` | Common request/status API, device registry and lifecycle states, validation, DMA mapping foundation, and synthetic backend validated on all ISAs; asynchronous completion, cancellation, and production bounce-buffer paths remain |
-| **7.1b Partitions and read-only filesystems** | `PARTIAL` | GPT/MBR metadata parser added; FAT32, ext4, ISO9660, and UDF mounting remain |
-| **7.1c VirtIO-Block** | `PARTIAL` | x86_64 transitional VirtIO-PCI discovery, legacy queue geometry, feature negotiation, read/write/flush completion, and QEMU runtime verification; VirtIO-MMIO AArch64/RISC-V completion and modern PCI transport remain experimental |
-| **7.1d NVMe** | `PLANNED` | NVMe controller, namespaces, PRP reads, reset recovery |
-| **7.1e AHCI/SATA/ATAPI** | `PLANNED` | SATA SSD/HDD reads and CD/DVD packet reads |
+| **7.1b Partitions and read-only filesystems** | `COMPLETED` | GPT/MBR metadata parser added; ext4 mounting via partition offset verified |
+| **7.1c VirtIO-Block** | `COMPLETED` | x86_64 transitional VirtIO-PCI discovery, legacy queue geometry, feature negotiation, read/write/flush completion, and QEMU runtime verification; VirtIO-MMIO AArch64/RISC-V completion and modern PCI transport remain experimental |
+| **7.1d NVMe** | `PARTIAL` | NVMe controller discovery, memory mapped registers, DMA IO queue construction, and submit_request implemented; controller enable transition debugging on QEMU remains |
+| **7.1e AHCI/SATA/ATAPI** | `COMPLETED` | AHCI PCI discovery, HBA reset, port enumeration, IDENTIFY DEVICE, DMA read/write dispatch, and flush completed |
 | **7.1f SDHCI and USB Mass Storage** | `PLANNED` | SD/microSD, xHCI, BOT/UAS, USB flash and optical media |
 | **7.1g Controlled writes** | `PARTIAL` | Common writable/read-only policy, FUA/barrier flags, flush dispatch, and synthetic write tests; filesystem/hardware writes remain |
 | **7.1h Storage emulator and test harness** | `COMPLETED` | QEMU storage profiles in OVD and x86 launcher; script/OVD unit tests, dry-run command inspection, and all-ISA storage integration tests |

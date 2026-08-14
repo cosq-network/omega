@@ -9,6 +9,9 @@ clang++ -std=c++20 -Wall -Wextra -I"${PROJECT_ROOT}/kernel/include" \
     "${PROJECT_ROOT}/kernel/sys/vfs.cpp" \
     "${PROJECT_ROOT}/kernel/sys/security.cpp" \
     "${PROJECT_ROOT}/kernel/sys/storage.cpp" \
+    "${PROJECT_ROOT}/kernel/sys/partition.cpp" \
+    "${PROJECT_ROOT}/kernel/sys/ahci.cpp" \
+    "${PROJECT_ROOT}/kernel/sys/nvme.cpp" \
     "${PROJECT_ROOT}/kernel/sys/dma.cpp" \
     "${PROJECT_ROOT}/kernel/sys/memory_block.cpp" \
     -o "${TEST_DIR}/ext4_unit"

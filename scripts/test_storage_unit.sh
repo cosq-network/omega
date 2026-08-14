@@ -9,6 +9,8 @@ clang++ -std=c++20 -Wall -Wextra -I"${PROJECT_ROOT}/kernel/include" \
     "${PROJECT_ROOT}/kernel/sys/dma.cpp" \
     "${PROJECT_ROOT}/kernel/sys/memory_block.cpp" \
     "${PROJECT_ROOT}/kernel/sys/partition.cpp" \
+    "${PROJECT_ROOT}/kernel/sys/ahci.cpp" \
+    "${PROJECT_ROOT}/kernel/sys/nvme.cpp" \
     -o "${TEST_DIR}/storage_unit"
 "${TEST_DIR}/storage_unit"
 echo "[PASS] Storage host unit tests"
