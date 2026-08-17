@@ -96,4 +96,34 @@ int VirtualFilesystem::chown(const char* path, security::uid_t uid, security::gi
     return 0;
 }
 
+VfsNode* VirtualFilesystem::create(const char* path, uint32_t mode) {
+    if (!path || path[0] != '/' || !root_node) return nullptr;
+    // Split into parent path + final component.
+    size_t slash = 0;
+    for (size_t i = 0; path[i]; ++i) {
+        if (path[i] == '/') slash = i;
+    }
+    if (slash == 0) return nullptr; // cannot create at root
+    char parent_path[256]{};
+    for (size_t i = 0; i < slash && i + 1 < sizeof(parent_path); ++i) parent_path[i] = path[i];
+    const char* name = path + slash + 1;
+    if (!name[0]) return nullptr;
+    VfsNode* parent = open(parent_path);
+    if (!parent || parent->type != DIRECTORY_TYPE || !parent->create) return nullptr;
+    VfsNode* node = parent->create(parent, name, mode);
+    if (node) kernel::kprintf("[+] VFS created '%s' (mode %o)\n", path, mode);
+    return node;
+}
+
+int VirtualFilesystem::truncate(VfsNode* node, size_t size) {
+    if (!node) return -1;
+    if (node->truncate) return node->truncate(node, size);
+    return -1;
+}
+
+int VirtualFilesystem::readdir(VfsNode* node, size_t offset, uint8_t* buf, size_t len) {
+    if (!node || node->type != DIRECTORY_TYPE || !node->readdir) return -1;
+    return node->readdir(node, offset, buf, len);
+}
+
 } // namespace vfs

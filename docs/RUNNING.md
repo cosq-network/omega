@@ -41,8 +41,9 @@ entry plus `SYS_write`/`SYS_exit` through the native `syscall` path:
 
 This is an x86_64 reference-platform path. The current init has a minimal
 assembly startup/syscall stub rather than a general libc. COW `fork`,
-`wait4`, signals, dynamic linking, and native AArch64/RISC-V userspace remain
-future milestones.
+`wait4`, and the hosted `/bin/echo` replacement probe are verified on all
+three ISAs; full signals, dynamic linking, filesystem mutation, and native
+shell-level userspace remain future milestones.
 
 ### musl and TinyCC SDKs
 
@@ -87,6 +88,16 @@ build-validated but are not yet advertised as QEMU-runtime complete because
 current-directory and filesystem mutation syscalls are still being finished.
 `cd` is a shell builtin, not an external command. See
 [`POSIX_COMMANDS_PORTING_PLAN.md`](POSIX_COMMANDS_PORTING_PLAN.md).
+
+The hosted replacement probe can be run with:
+
+```bash
+bash scripts/test_command_runtime.sh
+```
+
+It verifies `/bin/echo` replacement and successful exit through `execve` on all
+three reference ISAs. Broader output, filesystem mutation, and shell-command
+conformance remain follow-up coverage.
 
 **Automated tests:**
 

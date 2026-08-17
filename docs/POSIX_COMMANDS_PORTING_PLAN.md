@@ -1,8 +1,9 @@
 # Omega POSIX Command Porting Plan
 
 Status (2026-08-17): initial standalone command slice implemented and
-validated for x86_64, AArch64, and RISC-V 64; kernel filesystem ABI work
-remains for on-target execution.
+validated for x86_64, AArch64, and RISC-V 64. The first `/bin/echo` execve
+runtime probe now passes on all three ISAs; filesystem mutation, signal, and
+broader command conformance work remains.
 
 ## Scope
 
@@ -61,8 +62,12 @@ available to userland:
 - persistent-root backing once the ext4 integration is enabled.
 
 The current kernel has a useful read/open/getdents foundation, but mutation,
-link, current-directory, and complete process-exec semantics are still being
-completed. The command binaries therefore validate the port and link ABI now;
+link, and complete process-exec semantics are still being completed
+incrementally. Per-process `cwd`, relative path resolution, argv/envp-aware
+`execve`, nested initrd lookup, `writev`, and `exit_group` now land. The
+`/bin/echo` replacement probe passes on all three ISAs; filesystem mutation,
+signals, broader output/ABI conformance, and shell-level command integration
+remain. The command binaries therefore validate the port and link ABI now;
 runtime QEMU tests should be added as each syscall group lands.
 
 ## Execution milestones

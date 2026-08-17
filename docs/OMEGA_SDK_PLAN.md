@@ -476,8 +476,10 @@ CI should build and test each profile independently:
   subset, and application packaging;
 - build a small shell and file utility set; the initial utility set is tracked
   in [`POSIX_COMMANDS_PORTING_PLAN.md`](POSIX_COMMANDS_PORTING_PLAN.md) and
-  currently has all-ISA static build validation, while QEMU runtime coverage
-  awaits the remaining directory and mutation syscalls.
+  currently has all-ISA static build validation plus a hosted `/bin/echo`
+  `execve` replacement probe passing on all three ISAs; QEMU runtime coverage
+  still awaits the remaining directory, mutation, signal, and command
+  conformance work.
 
 ### SDK-4: Dynamic runtime
 

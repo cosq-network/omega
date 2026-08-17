@@ -5,7 +5,7 @@
 trap_entry:
     /* sscratch contains the supervisor stack while U-mode owns sp. */
     csrrw sp, sscratch, sp
-    addi sp, sp, -288
+    addi sp, sp, -296
     sd x1, 8(sp); sd x2, 16(sp); sd x3, 24(sp); sd x4, 32(sp)
     sd x5, 40(sp); sd x6, 48(sp); sd x7, 56(sp); sd x8, 64(sp)
     sd x9, 72(sp); sd x10, 80(sp); sd x11, 88(sp); sd x12, 96(sp)
@@ -18,6 +18,7 @@ trap_entry:
     csrr t0, sepc; sd t0, 256(sp)
     csrr t0, scause; sd t0, 264(sp)
     csrr t0, stval; sd t0, 272(sp)
+    csrr t0, sstatus; sd t0, 280(sp)
     /* Supervisor code must opt in before dereferencing U-mode buffers. */
     csrr t0, sstatus
     li t1, (1 << 18) /* SUM */
@@ -33,7 +34,7 @@ trap_entry:
     ld x17, 136(t6); ld x18, 144(t6); ld x19, 152(t6); ld x20, 160(t6)
     ld x21, 168(t6); ld x22, 176(t6); ld x23, 184(t6); ld x24, 192(t6)
     ld x25, 200(t6); ld x26, 208(t6); ld x27, 216(t6); ld x28, 224(t6)
-    addi t5, t6, 288
+    addi t5, t6, 296
     csrw sscratch, t5
     csrr t0, sstatus
     li t1, (1 << 18)
@@ -42,6 +43,8 @@ trap_entry:
     csrw sstatus, t0
     ld t0, 256(t6)
     csrw sepc, t0
+    ld t0, 280(t6)
+    csrw sstatus, t0
     ld x29, 232(t6); ld x30, 240(t6)
     ld sp, 0(t6)
     ld x31, 248(t6)
@@ -54,6 +57,18 @@ riscv_prepare_exception_stack:
 .global riscv_enter_userland
 riscv_enter_userland:
     mv sp, a1
+    csrw sepc, a0
+    csrr t0, sstatus
+    li t1, (1 << 8)
+    not t1, t1
+    and t0, t0, t1
+    ori t0, t0, (1 << 5)
+    csrw sstatus, t0
+    sret
+.global riscv_enter_userland_tls
+riscv_enter_userland_tls:
+    mv sp, a1
+    mv tp, a2
     csrw sepc, a0
     csrr t0, sstatus
     li t1, (1 << 8)

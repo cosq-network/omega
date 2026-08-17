@@ -13,7 +13,8 @@ struct InitrdEntry {
 static InitrdEntry* entries = nullptr;
 
 static vfs::VfsNode* finddir(vfs::VfsNode* node, const char* name) {
-    auto* entry = node == nullptr ? nullptr : reinterpret_cast<InitrdEntry*>(node->fs_data);
+    auto* owner = node == nullptr ? nullptr : reinterpret_cast<InitrdEntry*>(node->fs_data);
+    auto* entry = node != nullptr && node->name[0] == '/' ? owner : (owner ? owner->children : nullptr);
     while (entry != nullptr) {
         if (name != nullptr) {
             size_t i = 0;
@@ -23,6 +24,28 @@ static vfs::VfsNode* finddir(vfs::VfsNode* node, const char* name) {
         entry = entry->next;
     }
     return nullptr;
+}
+
+static int readdir(vfs::VfsNode* node, size_t offset, uint8_t* buf, size_t len) {
+    auto* owner = node == nullptr ? nullptr : reinterpret_cast<InitrdEntry*>(node->fs_data);
+    if (!owner || !buf) return -1;
+    InitrdEntry* entry = node->name[0] == '/' ? owner : owner->children;
+    for (size_t index = 0; entry && index < offset; ++index) entry = entry->next;
+    if (!entry) return 0;
+    size_t name_len = 0;
+    while (entry->node.name[name_len]) ++name_len;
+    const size_t reclen = (19 + name_len + 1 + 7) & ~size_t(7);
+    if (reclen > len) return -1;
+    for (size_t i = 0; i < reclen; ++i) buf[i] = 0;
+    auto put64 = [&](size_t off, uint64_t value) {
+        for (size_t i = 0; i < 8; ++i) buf[off + i] = static_cast<uint8_t>((value >> (8 * i)) & 0xff);
+    };
+    put64(0, static_cast<uint64_t>(offset + 1));
+    put64(8, static_cast<uint64_t>(offset + 1));
+    buf[16] = static_cast<uint8_t>(reclen);
+    buf[18] = static_cast<uint8_t>(entry->node.type == vfs::DIRECTORY_TYPE ? 4 : 8);
+    for (size_t i = 0; i < name_len; ++i) buf[19 + i] = static_cast<uint8_t>(entry->node.name[i]);
+    return static_cast<int>(reclen);
 }
 
 static int read_file(vfs::VfsNode* node, size_t offset, size_t size, uint8_t* buffer) {
@@ -55,10 +78,12 @@ static InitrdEntry* new_directory(const char* name) {
     entry->node.read = nullptr;
     entry->node.write = nullptr;
     entry->node.finddir = finddir;
-    entry->node.readdir = nullptr;
+    entry->node.readdir = readdir;
     entry->node.create = nullptr;
     entry->node.truncate = nullptr;
-    entry->node.fs_data = nullptr;
+    // Directory nodes retain their owning entry so finddir/readdir can reach
+    // the mutable child list while file nodes use fs_data for file bytes.
+    entry->node.fs_data = entry;
     entry->children = nullptr;
     entry->next = nullptr;
     return entry;

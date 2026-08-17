@@ -32,6 +32,20 @@ static uint8_t kernel_heap_buffer[1024 * 1024] __attribute__((aligned(8)));
 static uint8_t pmm_bitmap_buffer[4096]
     __attribute__((aligned(4096), section(".pmm_bitmap")));
 
+static void kernel_rescue_thread() {
+    for (;;) {
+#if defined(__x86_64__)
+        asm volatile("hlt" ::: "memory");
+#elif defined(__aarch64__)
+        asm volatile("wfe" ::: "memory");
+#elif defined(__riscv)
+        asm volatile("wfi" ::: "memory");
+#else
+        asm volatile("" ::: "memory");
+#endif
+    }
+}
+
 #if defined(OMEGA_ENABLE_SCHEDULER_SELF_TEST) && defined(__x86_64__)
 static volatile uint32_t scheduler_test_a = 0;
 static volatile uint32_t scheduler_test_b = 0;
@@ -212,6 +226,9 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
 
     // Initialize Preemptive Thread Scheduler
     scheduler::Scheduler::init();
+    // Keep a kernel-only continuation available when the active userspace
+    // process exits or takes an unrecoverable user fault.
+    scheduler::Scheduler::create_thread(kernel_rescue_thread);
 #if defined(__x86_64__)
     hal::timer_init(100);
 #if defined(OMEGA_ENABLE_SCHEDULER_SELF_TEST)

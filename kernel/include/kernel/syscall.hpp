@@ -9,6 +9,7 @@ enum SyscallNumber {
 #if defined(__x86_64__)
     SYS_READ       = 0,
     SYS_WRITE      = 1,
+    SYS_WRITEV     = 20,
     SYS_OPEN       = 2,
     SYS_CLOSE      = 3,
     SYS_MMAP       = 9,
@@ -18,6 +19,7 @@ enum SyscallNumber {
     SYS_FORK       = 57,
     SYS_EXECVE     = 59,
     SYS_EXIT       = 60,
+    SYS_EXIT_GROUP = 231,
     SYS_WAIT4      = 61,
     SYS_OPENAT     = 257,
     SYS_UMASK      = 95,
@@ -49,6 +51,8 @@ enum SyscallNumber {
     SYS_CLOCK_GETTIME = 228,
     SYS_PIPE2      = 293,
     SYS_SET_TID_ADDRESS = 218,
+    SYS_GETCWD      = 79,
+    SYS_CHDIR       = 80,
 #if defined(__x86_64__)
     SYS_ARCH_PRCTL = 158,
 #endif
@@ -58,7 +62,9 @@ enum SyscallNumber {
     SYS_CLOSE      = 57,
     SYS_READ       = 63,
     SYS_WRITE      = 64,
+    SYS_WRITEV     = 66,
     SYS_EXIT       = 93,
+    SYS_EXIT_GROUP = 94,
     SYS_BRK        = 214,
     SYS_MUNMAP     = 215,
     SYS_MMAP       = 222,
@@ -96,6 +102,8 @@ enum SyscallNumber {
     SYS_CLOCK_GETTIME = 113,
     SYS_PIPE2      = 59,
     SYS_SET_TID_ADDRESS = 96,
+    SYS_GETCWD      = 17,
+    SYS_CHDIR       = 49,
 #endif
 #if !defined(__x86_64__)
     SYS_OPEN       = 1024, // deprecated Omega compatibility entry

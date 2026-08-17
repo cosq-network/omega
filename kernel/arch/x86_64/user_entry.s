@@ -97,7 +97,21 @@ x86_page_fault_stub:
     push %rax
     mov %rsp, %rdi
     call x86_page_fault
-1:
-    cli
-    hlt
-    jmp 1b
+    mov %rax, %rsp
+    pop %rax
+    pop %rbx
+    pop %rcx
+    pop %rdx
+    pop %rsi
+    pop %rdi
+    pop %rbp
+    pop %r8
+    pop %r9
+    pop %r10
+    pop %r11
+    pop %r12
+    pop %r13
+    pop %r14
+    pop %r15
+    add $8, %rsp              /* discard the page-fault error code */
+    iretq

@@ -64,6 +64,22 @@ Thread* Scheduler::create_thread(void (*entry)()) {
     frame[18] = stack;
     frame[19] = KERNEL_SS;
     new_thread->stack_ptr = reinterpret_cast<uintptr_t>(frame);
+#elif defined(__aarch64__)
+    // lower_irq restores this frame and returns with eret.  M=0x5 selects
+    // EL1h so a rescue/kernel thread never re-enters EL0 after a user fault.
+    auto* frame = reinterpret_cast<uint64_t*>(stack) - 34;
+    for (int i = 0; i < 34; ++i) frame[i] = 0;
+    frame[32] = reinterpret_cast<uintptr_t>(&thread_bootstrap); // elr_el1
+    frame[33] = 0x5; // SPSR_EL1: EL1h
+    new_thread->stack_ptr = reinterpret_cast<uintptr_t>(frame);
+#elif defined(__riscv)
+    // trap_entry restores this frame and sret returns to S-mode (SPP=1).
+    auto* frame = reinterpret_cast<uint64_t*>(stack) - 37;
+    for (int i = 0; i < 37; ++i) frame[i] = 0;
+    frame[0] = stack;
+    frame[32] = reinterpret_cast<uintptr_t>(&thread_bootstrap); // sepc
+    frame[35] = (1ull << 8) | (1ull << 5); // SPP=1, SPIE=1
+    new_thread->stack_ptr = reinterpret_cast<uintptr_t>(frame);
 #else
     new_thread->stack_ptr = stack;
 #endif
@@ -142,6 +158,10 @@ uintptr_t Scheduler::timer_tick(uintptr_t saved_stack) {
         return current_thread->stack_ptr;
     }
     return saved_stack;
+}
+
+void Scheduler::terminate_current() {
+    if (current_thread != nullptr) current_thread->state = TERMINATED;
 }
 
 void Scheduler::attach_current_process(process::Process* process) {

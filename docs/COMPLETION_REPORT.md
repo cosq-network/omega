@@ -1,7 +1,7 @@
 # Omega Kernel: Phase Completion & Architecture Status Report
 
 ## Executive Summary
-This report summarizes the successful end-to-end design, implementation, and empirical QEMU verification of **Omega**—a freestanding, cross-platform microkernel core written in C++20. Omega cross-compiles natively on macOS (Apple Silicon M1/M2/M3) using Clang and LLVM (`ld.lld`) and targets **x86_64** (x64), **AArch64** (ARM64), and **RISC-V 64**. The x86_64 reference platform now includes a verified initrd-backed Ring 3 userspace bootstrap.
+This report summarizes the successful end-to-end design, implementation, and empirical QEMU verification of **Omega**—a freestanding, cross-platform microkernel core written in C++20. Omega cross-compiles natively on macOS (Apple Silicon M1/M2/M3) using Clang and LLVM (`ld.lld`) and targets **x86_64** (x64), **AArch64** (ARM64), and **RISC-V 64**. All three reference platforms now include verified initrd-backed userspace bootstraps with native privilege transitions and syscall paths.
 
 ---
 
@@ -19,15 +19,30 @@ This report summarizes the successful end-to-end design, implementation, and emp
 | **Physical Memory (PMM)** | 4KiB Bitmap Frame Allocator | 4KiB Bitmap Frame Allocator | `alloc_frame` / `free_frame` |
 | **Virtual Memory (VMM)** | Page Table Control (`CR3`) | Translation Table (`TTBR0_EL1`) | `map_page` / `unmap_page` |
 | **Kernel Heap Allocator** | Free-List Coalescing `kmalloc` | Free-List Coalescing `kmalloc` | Dynamic Memory Allocation |
-| **Thread Scheduler** | Circular Round-Robin Scheduler | Circular Round-Robin Scheduler | Cooperative Thread Yields |
-| **System Call ABI** | Linux-numbered dispatcher plus native `syscall`/`sysretq` Ring 3 path | Dispatcher and ABI definitions | Dispatcher-only bring-up |
+| **Thread Scheduler** | Circular Round-Robin Scheduler with timer-driven handoff hooks | Cross-ISA saved trap-frame paths and timer return hooks | Process-class switching and SMP run queues remain |
+| **System Call ABI** | Linux-numbered dispatcher plus native `syscall`/`sysretq` Ring 3 path | Native lower-EL trap dispatch and return paths | Focused userspace ABI verified by native tests |
 | **Virtual Filesystem** | VFS Node Tree (`/` Mounted) | VFS Node Tree (`/` Mounted) | `vfs::open("/")` |
 | **RAM Disk (Initrd)** | Memory File Abstraction Driver | Memory File Abstraction Driver | `initrd::init(0x600000)` |
-| **Userland Privilege** | Real Ring 3 `iretq` entry, TSS kernel stack, page-fault gate | EL0 manager placeholder | `scripts/test_userland.sh` |
+| **Userland Privilege** | Real Ring 3 `iretq` entry, TSS kernel stack, and isolated user-fault termination | Real EL0 entry, exception frames, and isolated user-fault termination | `scripts/test_native_userland.sh` |
 | **ELF Executable Loader** | Validated static `PT_LOAD` mapping into PID 1 | 64-bit ELF header parser | Initrd `/init` QEMU test |
-| **POSIX Syscall Surface** | `sys_open`, `sys_fork`, `sys_execve` | `sys_open`, `sys_fork`, `sys_execve` | File Descriptor Table |
+| **POSIX Syscall Surface** | open/read/write/writev/close, fork/execve, brk/mmap, wait/exit, cwd and directory paths | Same hosted ABI with native syscall numbers | `scripts/test_process.sh`, `scripts/test_command_runtime.sh` |
 | **PCI Bus Scanner** | Ports `0xCF8`/`0xCFC` Config Scan | AArch64 Device Scanner | Vendor/Device ID Read |
 | **VirtIO Network Stack** | VirtIO-Net, IPv4 L3, UDP/TCP L4 | VirtIO-Net, IPv4 L3, UDP/TCP L4 | Packet Handler Interface |
+
+### Current cross-ISA verification slice
+
+The current hardening/runtime tranche is verified with:
+
+- `scripts/test_process.sh` — process lifecycle, COW, cleanup, and the
+  read/write/execute protection matrix;
+- `scripts/test_scheduler.sh` — scheduler and timer-preemption hooks;
+- `scripts/test_native_userland.sh` — native AArch64 and RISC-V userspace;
+- `scripts/test_command_runtime.sh` — argv/envp-aware `/bin/echo` replacement
+  through hosted `execve`, `writev`, and `exit_group` on x86_64, AArch64, and
+  RISC-V.
+
+Signals, writable filesystem mutation, full process supervision, GICv3/PLIC
+completion, SMP, and cross-core TLB shootdowns remain roadmap work.
 
 ---
 

@@ -442,8 +442,12 @@ provided by `scripts/build_commands.sh` and validated for all three target
 ISAs by `scripts/test_commands_build.sh`. The remaining bootstrap entries
 (`printf`, `[`, `head`, `tail`, `cp`, `sleep`, `kill`, `basename`, and
 `dirname`) remain follow-up work. This build milestone does not imply that
-Bash can yet execute external commands under QEMU; incomplete `execve`,
-current-directory, and filesystem mutation paths remain hard gates.
+Bash can yet execute the full external-command set under QEMU; filesystem
+mutation and complete process supervision remain hard gates. The
+current-directory ABI and a simple `/bin/echo` `execve` replacement probe
+have since been added and pass on all three ISAs. Filesystem mutation, signal
+delivery, process supervision, broader command output/ABI conformance, and
+shell-level external-command execution remain hard gates.
 
 ### Required shell-visible files
 

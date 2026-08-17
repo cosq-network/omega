@@ -38,6 +38,7 @@ public:
     static void block_current();
     static void wake(Thread* thread);
     static uintptr_t timer_tick(uintptr_t saved_stack);
+    static void terminate_current();
     static void run_current();
     [[noreturn]] static void thread_exit();
     static uint64_t tick_count();

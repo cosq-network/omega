@@ -25,8 +25,9 @@ milestone in Phase L5 is not yet claimed: it still requires a userspace
 The first command-line consumer slice is now built from the same SDK with
 `scripts/build_commands.sh`: 14 standalone utilities are validated as static
 ELFs for all three ISAs. These host-built artifacts provide the planned
-`/bin` bootstrap surface, but on-target compilation and execution remain gated
-by the process, current-directory, and filesystem mutation work described in
+`/bin` bootstrap surface. A hosted `/bin/echo` `execve` replacement probe now
+passes on all three ISAs, but on-target compilation and execution remain gated
+by process supervision, signals, and filesystem mutation work described in
 [`POSIX_COMMANDS_PORTING_PLAN.md`](POSIX_COMMANDS_PORTING_PLAN.md).
 
 ## 1. Purpose and Positioning
@@ -83,7 +84,7 @@ The remaining gaps are:
 
 | Gap | State today | Blocks |
 | :--- | :--- | :--- |
-| `execve` | General process replacement remains incomplete; boot-time `/init` works | Running a compiler-produced child program |
+| `execve` | argv/envp-aware `/bin/echo` replacement probe passes on all three ISAs; general process replacement remains incomplete | Running a compiler-produced child program |
 | `write(2)` | Only fds 1/2 → console; no VFS write path | TCC writing output files |
 | File creation | No `O_CREAT`, no VFS create, no ext4 inode allocation | TCC `-o` output |
 | `brk` | Page-backed growth is implemented for the static musl path | Full compiler workload stress testing |

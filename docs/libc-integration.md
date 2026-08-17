@@ -31,6 +31,12 @@ The first standalone musl-linked POSIX command slice is now available through
 `false`, `env`, and `test` for all three ISAs. This is a build/link milestone,
 not a claim of complete command runtime support; see
 [`POSIX_COMMANDS_PORTING_PLAN.md`](POSIX_COMMANDS_PORTING_PLAN.md).
+The hosted process path now copies `argv`/`envp` for `execve` and supports the
+`writev`, `exit_group`, `getcwd`, and `chdir` ABI entries needed by simple
+musl-linked utilities. The hosted `/bin/echo` replacement probe passes on all
+three ISAs. Full signal delivery, VFS mutation, broader post-`execve`
+trap/SBI cleanup, and complete command output conformance remain open
+milestones.
 
 ## 1. Purpose and Positioning
 
@@ -529,7 +535,7 @@ documentation:
 | :--- | :--- |
 | `docs/OMEGA_SDK_PLAN.md` | Defines SDK profiles (`omega-c`, `posix-static`), sysroot layout, and verification requirements. This plan specifies musl as the `posix-static` implementation. |
 | `docs/ROADMAP.md` Phase 10.1.1 | Static musl SDK is implemented; this plan defines the remaining hosted-POSIX sequence. |
-| `docs/ROADMAP.md` Phase 7.D.5 | "Userspace bootstrap" — lists full libc, shell, signals, and execve as remaining work. This plan covers the libc portion. |
+| `docs/ROADMAP.md` Phase 7.D.5 | "Userspace bootstrap" — records the verified static libc, command-build, and `/bin/echo` replacement slices while tracking signals, mutation, shell execution, and broader process semantics as remaining work. This plan covers the libc portion. |
 | `docs/ABI.md` | Syscall numbers and calling conventions are unchanged; this plan depends on the ABI being frozen. |
 | `docs/ARCHITECTURE.md` | HAL interfaces are unchanged; musl sits entirely in userspace. |
 

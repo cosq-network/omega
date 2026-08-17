@@ -19,6 +19,7 @@ sleep 3
 grep -Fq "Linux-compatible process/address-space manager initialized (PID 1)" "${LOG_FILE}"
 grep -Fq "[TEST][PASS] Isolated process address-space map/unmap" "${LOG_FILE}"
 grep -Fq "[TEST][PASS] COW fork, write fault, exit, and wait/reap" "${LOG_FILE}"
+grep -Fq "[TEST][PASS] Read/write/execute page protection matrix" "${LOG_FILE}"
 grep -Fq "[TEST][PASS] Process address-space and lifecycle path" "${LOG_FILE}"
 grep -Fq "System online. Entering idle loop" "${LOG_FILE}"
 echo "[SUCCESS] Process address-space isolation integration test passed."

@@ -2,6 +2,7 @@
 #include "kernel/heap.hpp"
 #include "kernel/memory.hpp"
 #include "kernel/kprint.hpp"
+#include "kernel/scheduler.hpp"
 
 namespace process {
 
@@ -98,6 +99,8 @@ Process* Manager::create() {
     process->user_entry = 0;
     process->user_stack = 0;
     process->tls_base = 0;
+    process->cwd[0] = '/';
+    process->cwd[1] = '\0';
     if (!memory::VirtualMemoryManager::create_address_space(&process->address_space)) {
         kfree(process);
         return nullptr;
@@ -226,6 +229,7 @@ int64_t Manager::fork() {
     Process* parent=current_process; Process* child=create();
     if (!child || parent->child_count>=8) return -ERR_ENOMEM;
     child->parent=parent;
+    for (size_t i = 0; i < sizeof(child->cwd); ++i) child->cwd[i] = parent->cwd[i];
     // Children inherit the parent's open file descriptors.
     for (uint32_t i = 0; i < FD_TABLE_SIZE; ++i) child->fd_table[i] = parent->fd_table[i];
     for(uint32_t i=0;i<parent->mapping_count;++i){
@@ -254,8 +258,23 @@ int64_t Manager::exit(int32_t status) {
 
 int64_t Manager::wait4(pid_t pid, int32_t* status) {
     if(!current_process)return -ERR_EINVAL;
-    for(uint32_t i=0;i<current_process->child_count;++i){Process*child=current_process->children[i];if(child&&child->exited&&(pid==-1||pid==child->pid)){if(status)*status=child->exit_status;pid_t result=child->pid;current_process->children[i]=current_process->children[--current_process->child_count];kfree(child);return result;}}
+    for(uint32_t i=0;i<current_process->child_count;++i){Process*child=current_process->children[i];if(child&&child->exited&&(pid==-1||pid==child->pid)){if(status)*status=child->exit_status;pid_t result=child->pid;release_mappings(child);current_process->children[i]=current_process->children[--current_process->child_count];kfree(child);return result;}}
     return -11;
+}
+
+void Manager::release_mappings(Process* process) {
+    if (process == nullptr) return;
+    for (uint32_t i = 0; i < process->mapping_count; ++i) {
+        const Mapping& mapping = process->mappings[i];
+        for (size_t offset = 0; offset < mapping.length; offset += memory::PAGE_SIZE) {
+            const uintptr_t va = mapping.address + offset;
+            const uintptr_t frame = memory::VirtualMemoryManager::get_physical_address(
+                &process->address_space, va);
+            memory::VirtualMemoryManager::unmap_page(&process->address_space, va);
+            if (frame != 0) memory::PhysicalMemoryManager::free_frame(frame);
+        }
+    }
+    process->mapping_count = 0;
 }
 
 bool Manager::handle_cow_fault(uintptr_t address) {
@@ -327,6 +346,19 @@ int64_t Manager::self_test() {
     if (wait4(child_pid, &status) != child_pid || status != 17 ||
         munmap(static_cast<uintptr_t>(cow_address), memory::PAGE_SIZE) != 0) return -ERR_EINVAL;
     kernel::kprintf("[TEST][PASS] COW fork, write fault, exit, and wait/reap\n");
+    const int64_t protected_address = mmap(0, memory::PAGE_SIZE, PROT_READ, 0x22, -1, 0);
+    if (protected_address < 0) return protected_address;
+    const uintptr_t protected_va = static_cast<uintptr_t>(protected_address);
+    const uint32_t read_only_flags = memory::VirtualMemoryManager::get_page_flags(
+        &first_process->address_space, protected_va);
+    if ((read_only_flags & (memory::PAGE_WRITABLE | memory::PAGE_EXEC)) != 0 ||
+        !memory::VirtualMemoryManager::set_page_flags(
+            &first_process->address_space, protected_va,
+            memory::PAGE_PRESENT | memory::PAGE_USER | memory::PAGE_EXEC) ||
+        !(memory::VirtualMemoryManager::get_page_flags(
+            &first_process->address_space, protected_va) & memory::PAGE_EXEC) ||
+        munmap(protected_va, memory::PAGE_SIZE) != 0) return -ERR_EINVAL;
+    kernel::kprintf("[TEST][PASS] Read/write/execute page protection matrix\n");
     return 0;
 }
 

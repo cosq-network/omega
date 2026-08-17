@@ -36,6 +36,7 @@ the toolchain files in `cmake/` and target `x86_64`, `aarch64`, and `riscv64`.
 | `test_bash_build.sh` | Build and validate the static Bash artifact for all three ISAs | `userland/bash/<arch>/` |
 | `build_commands.sh` | Build the standalone static POSIX command suite for one Omega ISA | `build/commands-<arch>/`, `userland/commands/<arch>/` |
 | `test_commands_build.sh` | Build and validate the POSIX command suite for all three ISAs | `userland/commands/<arch>/` |
+| `test_command_runtime.sh` | Execute `/bin/echo` through the hosted `execve` path on all three ISAs | `build/command-runtime-<arch>/` |
 | `create_initrd.py` | Pack a static userspace ELF into the Omega initrd format | Configured output path |
 | `test_userland.sh` | Build `/init`, pack an initrd, and verify x86_64 PT_LOAD mapping, Ring 3 entry, and `syscall` output in QEMU | `build/userland-x86_64/` |
 | `test_security.sh` | Linux UID/GID, supplementary-group, mode, and VFS permission tests | `build/security-tests/` |

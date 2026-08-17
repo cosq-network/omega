@@ -3,6 +3,7 @@
 #include "kernel/syscall.hpp"
 #include "kernel/process.hpp"
 #include "kernel/scheduler.hpp"
+#include "kernel/memory.hpp"
 
 namespace hal {
 extern "C" void aarch64_timer_interrupt();
@@ -39,6 +40,10 @@ extern "C" uintptr_t x86_syscall_interrupt(SyscallFrame* frame) {
     if (frame == nullptr) return reinterpret_cast<uintptr_t>(frame);
     frame->rax = static_cast<uint64_t>(syscall::SyscallDispatcher::dispatch6(
         frame->rax, frame->rdi, frame->rsi, frame->rdx, frame->r10, frame->r8, frame->r9));
+    if (process::Manager::current() == nullptr || !process::Manager::current()->alive) {
+        scheduler::Scheduler::terminate_current();
+        return scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
+    }
     return reinterpret_cast<uintptr_t>(frame);
 }
 
@@ -46,15 +51,26 @@ extern "C" uintptr_t x86_user_kernel_stack_top() {
     return reinterpret_cast<uintptr_t>(syscall_stack) + sizeof(syscall_stack);
 }
 
-extern "C" void x86_page_fault(void* raw_frame) {
+extern "C" uintptr_t x86_page_fault(void* raw_frame) {
     uint64_t fault_address = 0;
     asm volatile("mov %%cr2, %0" : "=r"(fault_address));
     auto* words = reinterpret_cast<const uint64_t*>(raw_frame);
     const uint64_t error = words != nullptr ? words[15] : 0;
     const uint64_t rip = words != nullptr ? words[16] : 0;
-    if ((error & 2) && process::Manager::handle_cow_fault(fault_address)) return;
+    const bool from_user = words != nullptr && words[17] == 0x1b;
+    if ((error & 2) && process::Manager::handle_cow_fault(fault_address)) {
+        return reinterpret_cast<uintptr_t>(raw_frame);
+    }
+    if (from_user) {
+        kernel::kprintf("[!] x86 user page fault: terminating PID %d\n",
+                        process::Manager::current() != nullptr ? process::Manager::current()->pid : -1);
+        (void)process::Manager::exit(139);
+        scheduler::Scheduler::terminate_current();
+        return scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(raw_frame));
+    }
     kernel::kprintf("[PANIC] x86 page fault addr=%x error=%x rip=%x\n",
                     fault_address, error, rip);
+    for (;;) asm volatile("cli; hlt" ::: "memory");
 }
 #endif
 
@@ -80,34 +96,61 @@ extern "C" uintptr_t aarch64_exception_handler(uintptr_t* frame) {
         asm volatile("msr elr_el1, %0" : : "r"(pc + 4) : "memory");
     } else if (ec == 0x20 || ec == 0x21 || ec == 0x24 || ec == 0x25) {
         uint64_t far; asm volatile("mrs %0, far_el1" : "=r"(far));
-        if ((ec == 0x24 || ec == 0x25) && process::Manager::handle_cow_fault(far)) return 0;
+        if ((ec == 0x24 || ec == 0x25) && process::Manager::handle_cow_fault(far)) return reinterpret_cast<uintptr_t>(frame);
+        const bool from_user = (frame[32] & 0xf) == 0;
+        if (from_user) {
+            kernel::kprintf("[!] AArch64 user page fault: terminating PID %d\n",
+                            process::Manager::current() != nullptr ? process::Manager::current()->pid : -1);
+            (void)process::Manager::exit(139);
+            scheduler::Scheduler::terminate_current();
+            return scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
+        }
         kernel::kprintf("[!] AArch64 EL0 %s fault at %x (ESR %x)\n",
                         (ec == 0x20 || ec == 0x21) ? "instruction" : "data", far, esr);
     } else {
-        (void)scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
-        hal::aarch64_timer_interrupt();
+        return reinterpret_cast<uintptr_t>(frame);
     }
-    return 0;
+    if (!process::Manager::current() || !process::Manager::current()->alive) {
+        scheduler::Scheduler::terminate_current();
+        return scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
+    }
+    return reinterpret_cast<uintptr_t>(frame);
+}
+extern "C" uintptr_t aarch64_timer_exception_handler(uintptr_t* frame) {
+    hal::aarch64_timer_interrupt();
+    return scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
 }
 #elif defined(__riscv)
 extern "C" void riscv_prepare_exception_stack(uintptr_t);
 extern "C" uintptr_t riscv_exception_handler(uintptr_t* frame) {
     const uint64_t cause = frame[33];
     if ((cause >> 63) != 0 && (cause & 0xfff) == 5) {
-        (void)scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
         hal::riscv_timer_interrupt();
+        return scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
     } else if (cause == 8) {
         frame[10] = static_cast<uint64_t>(syscall::SyscallDispatcher::dispatch6(
             frame[17], frame[10], frame[11], frame[12], frame[13], frame[14], frame[15]));
         frame[32] += 4;
+        if (!process::Manager::current() || !process::Manager::current()->alive) {
+            scheduler::Scheduler::terminate_current();
+            return scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
+        }
     } else if (cause == 12 || cause == 13 || cause == 15) {
-        if (cause == 15 && process::Manager::handle_cow_fault(frame[34])) return 0;
+        if (cause == 15 && process::Manager::handle_cow_fault(frame[34])) return reinterpret_cast<uintptr_t>(frame);
+        const bool from_user = (frame[35] & (1ull << 8)) == 0;
+        if (from_user) {
+            kernel::kprintf("[!] RISC-V user page fault: terminating PID %d\n",
+                            process::Manager::current() != nullptr ? process::Manager::current()->pid : -1);
+            (void)process::Manager::exit(139);
+            scheduler::Scheduler::terminate_current();
+            return scheduler::Scheduler::timer_tick(reinterpret_cast<uintptr_t>(frame));
+        }
         kernel::kprintf("[!] RISC-V U-mode %s page fault at %x pc=%x\n",
                         cause == 12 ? "instruction" : cause == 13 ? "load" : "store", frame[34], frame[32]);
     } else {
         kernel::kprintf("[!] RISC-V unexpected user trap cause %u\n", cause);
     }
-    return 0;
+    return reinterpret_cast<uintptr_t>(frame);
 }
 #endif
 
@@ -116,6 +159,13 @@ namespace userland {
 void UserlandManager::init_x86_syscall_stack() {
 #if defined(__x86_64__)
     const uintptr_t stack_top = reinterpret_cast<uintptr_t>(syscall_stack) + sizeof(syscall_stack);
+    // The syscall entry swaps GS to KERNEL_GS_BASE and loads its stack from
+    // [GS_BASE+0] (top value) and saves the user rsp at [GS_BASE+8]. These
+    // two words must be initialized explicitly — they are NOT covered by the
+    // syscall_stack array itself (which ends exactly at stack_top).
+    auto* stack_words = reinterpret_cast<uint64_t*>(syscall_stack + sizeof(syscall_stack));
+    stack_words[0] = stack_top; // [GS_BASE+0] = kernel stack top
+    stack_words[1] = 0;         // [GS_BASE+8] = saved user rsp (cleared)
     const uint64_t star = (static_cast<uint64_t>(0x18) << 48) | (static_cast<uint64_t>(0x08) << 32);
     wrmsr(0xC0000101, 0);                // IA32_GS_BASE (user-visible base)
     wrmsr(0xC0000102, stack_top);        // IA32_KERNEL_GS_BASE
@@ -143,25 +193,59 @@ void UserlandManager::init_riscv_exception_stack() {
 #endif
 }
 
+void UserlandManager::set_fs_base(uintptr_t base) {
+#if defined(__x86_64__)
+    wrmsr(0xC0000100, base); // IA32_FS_BASE
+    process::Process* proc = process::Manager::current();
+    if (proc != nullptr) proc->tls_base = base;
+#else
+    (void)base;
+#endif
+}
+
 void UserlandManager::enter_userland(uintptr_t user_entry, uintptr_t user_stack) {
+    enter_userland(user_entry, user_stack, process::Manager::tls_base());
+}
+
+void UserlandManager::enter_userland(uintptr_t user_entry, uintptr_t user_stack, uintptr_t tls_base) {
+    kernel::kprintf("[+] userland enter: free frames=%u\n", memory::PhysicalMemoryManager::get_free_frames());
 #if defined(__x86_64__)
     kernel::kprintf("[+] Entering x86_64 Ring 3 init (Entry: %x, Stack: %x)\n", user_entry, user_stack);
+    if (tls_base != 0) wrmsr(0xC0000100, tls_base); // IA32_FS_BASE
     x86_enter_userland(user_entry, user_stack);
 #elif defined(__aarch64__)
     kernel::kprintf("[+] Entering AArch64 EL0 init (Entry: %x, Stack: %x)\n", user_entry, user_stack);
-    aarch64_enter_userland(user_entry, user_stack);
+    aarch64_enter_userland_tls(user_entry, user_stack, tls_base);
 #elif defined(__riscv)
     kernel::kprintf("[+] Entering RISC-V U-mode init (Entry: %x, Stack: %x)\n", user_entry, user_stack);
-    riscv_enter_userland(user_entry, user_stack);
+    riscv_enter_userland_tls(user_entry, user_stack, tls_base);
 #else
     (void)user_entry;
     (void)user_stack;
+    (void)tls_base;
     kernel::kprintf("[!] Native userland entry is only enabled on x86_64.\n");
 #endif
+}
+
+void UserlandManager::enter_userland_from_syscall(uintptr_t user_entry, uintptr_t user_stack, uintptr_t tls_base) {
+#if defined(__x86_64__)
+    // x86 syscall_entry executes swapgs before entering C. Restore the
+    // user-visible GS base before iretq so the next syscall swaps back to the
+    // initialized kernel stack rather than loading RSP from GS_BASE=0.
+    asm volatile("swapgs" ::: "memory");
+#elif defined(__riscv)
+    // Likewise, reset sscratch after replacing the image from trap context.
+    riscv_prepare_exception_stack(reinterpret_cast<uintptr_t>(exception_stack) + sizeof(exception_stack));
+#endif
+    enter_userland(user_entry, user_stack, tls_base);
 }
 
 } // namespace userland
 
 extern "C" void jump_to_userland(uintptr_t user_entry, uintptr_t user_stack) {
     userland::UserlandManager::enter_userland(user_entry, user_stack);
+}
+
+extern "C" void jump_to_userland_tls(uintptr_t user_entry, uintptr_t user_stack, uintptr_t tls_base) {
+    userland::UserlandManager::enter_userland(user_entry, user_stack, tls_base);
 }

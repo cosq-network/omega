@@ -42,7 +42,7 @@ networking, display, input, recovery, and a stable userspace ABI.
 | **Phase 3B: Virtual Memory (VMM)** | `PARTIAL` | Per-process x86_64, AArch64 4 KiB, and RISC-V Sv39 roots with user mappings | `CR3`, `TTBR0_EL1`, `satp` | all-ISA builds; TLB/SMP discipline remains |
 | **Phase 3C: Dynamic Kernel Heap** | `COMPLETED` | Free-list block header allocator | `kmalloc` / `kfree` with block coalescing | Static Heap Buffer |
 | **Phase 3D: Interrupt Drivers** | `COMPLETED` | Hardware interrupt gate setup | 256-entry IDT (x86), VBAR (ARM), STVEC/PLIC (RISC-V) | Hardware Traps |
-| **Phase 4A: Preemptive Multi-threading**| `COMPLETED` | Round-robin thread scheduler | Thread Control Blocks (TCB), stack allocation | Cooperative Yields |
+| **Phase 4A: Preemptive Multi-threading**| `COMPLETED` | Round-robin thread scheduler with timer-preemption hooks | Thread Control Blocks (TCB), stack allocation, saved-frame handoff | Full process-class switching and SMP run queues |
 | **Phase 4B: System Call ABI Dispatcher**| `COMPLETED` | Linux-numbered six-argument dispatcher with x86_64 syscall/sysretq, AArch64 svc/eret, and RISC-V ecall/sret paths | `SYS_YIELD`, `SYS_WRITE`, memory, process, and credential calls | all-ISA builds and native entry code |
 | **Phase 5A: Virtual Filesystem (VFS)** | `COMPLETED` | VFS node tree & root directory mount | POSIX node operations, `/` mount | `vfs::open("/")` |
 | **Phase 5B: RAM Disk Initrd** | `COMPLETED` | Initial RAM disk memory file driver | Memory file header reader | `initrd::init()` |
@@ -150,10 +150,10 @@ complete.
 | Milestone | Status | Deliverable | Verification |
 | :--- | :---: | :--- | :--- |
 | **7.D.1 Timer-independent scheduler core** | `PLANNED` | Architecture-neutral scheduler clock, priorities, accounting, and preemption hooks | Identical scheduler tests on all ISAs |
-| **7.D.2 Per-process address spaces** | `PARTIAL` | Isolated x86_64, AArch64 TTBR0, and RISC-V Sv39 page tables with COW lifecycle, active process activation, process-owned Linux-style credentials/descriptors, syscall numbering, anonymous mappings, and bounded user-range checks | `scripts/test_process.sh`, `scripts/test_native_userland.sh`, `scripts/test_c_sdk.sh`; permission-fault termination and scheduler switching remain |
+| **7.D.2 Per-process address spaces** | `PARTIAL` | Isolated x86_64, AArch64 TTBR0, and RISC-V Sv39 page tables with COW lifecycle, saved trap-frame activation, kernel rescue continuation, process-owned Linux-style credentials/descriptors, syscall numbering, anonymous mappings, bounded user-range checks, and mapped-frame cleanup on reap | `scripts/test_process.sh`, `scripts/test_native_userland.sh`, `scripts/test_c_sdk.sh`; full permission-fault matrix, scheduler switching for all process classes, and page-table reclamation remain |
 | **7.D.3 Capability-based IPC** | `PLANNED` | Typed messages, endpoint ownership, capability transfer, shared-memory grants, timeout/cancellation | Driver-server round-trip and abuse tests |
 | **7.D.4 Portable driver contracts** | `PLANNED` | Common interrupt, DMA, MMIO, block, net, display, and input interfaces | Synthetic drivers plus all-ISA contract tests |
-| **7.D.5 Userspace bootstrap** | `PARTIAL` | Initrd-backed PID 1, PT_LOAD mapping, Omega initial stack ABI, native entry/syscall return, minimal crt0/syscall stubs, C runtime, static musl SDK, and first-tier POSIX command ELFs on all three ISAs; full command runtime, libc, Bash script execution, interactive shell, signals, and architecture-neutral process switching remain | `scripts/test_userland.sh`, `scripts/test_native_userland.sh`, `scripts/test_c_sdk.sh`, `scripts/test_commands_build.sh`, [`POSIX_COMMANDS_PORTING_PLAN.md`](POSIX_COMMANDS_PORTING_PLAN.md), [`BASH_PORTING_PLAN.md`](BASH_PORTING_PLAN.md) |
+| **7.D.5 Userspace bootstrap** | `PARTIAL` | Initrd-backed PID 1, PT_LOAD mapping, Omega initial stack ABI, native entry/syscall return, argv/envp-aware `execve`, `writev`/`exit_group`, nested initrd lookup, per-process cwd resolution, minimal crt0/syscall stubs, C runtime, static musl SDK, and first-tier POSIX command ELFs on all three ISAs; `/bin/echo` replacement probe passes on all three ISAs, while full VFS mutation, signals, Bash script execution, interactive shell, and architecture-neutral process switching remain | `scripts/test_userland.sh`, `scripts/test_native_userland.sh`, `scripts/test_c_sdk.sh`, `scripts/test_commands_build.sh`, `scripts/test_command_runtime.sh`, [`POSIX_COMMANDS_PORTING_PLAN.md`](POSIX_COMMANDS_PORTING_PLAN.md), [`BASH_PORTING_PLAN.md`](BASH_PORTING_PLAN.md) |
 | **7.D.6 Linux identity and permission model** | `PARTIAL` | UID/GID credentials, supplementary groups, umask, root DAC rules, mode bits, VFS traversal/read/write checks, process binding on the x86_64 foundation, and Linux syscall-number tables on all ISAs | `scripts/test_security.sh`, all-ISA builds/permission checks, ext4 ownership/mode parsing |
 
 **Architecture-track exit criteria:** each target boots on its reference QEMU
@@ -173,7 +173,9 @@ remaining work is intentionally incremental:
 2. **Harden permission faults** — terminate only the offending process and add
    read/write/execute regression tests.
 3. **Grow the runtime** — mapped `brk`, crt0/libc wrappers, signals, and
-   isolated `execve`.
+   broader `execve`/VFS coverage; the argv/envp-aware `/bin/echo` replacement
+   probe now passes on all three ISAs, while signal delivery, filesystem
+   mutation, and broader command output/ABI conformance remain outstanding.
 4. **Cross-ISA hardware maturity** — GICv3/PLIC acknowledgement, timer return
    frames, SMP, and TLB shootdowns.
 

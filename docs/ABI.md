@@ -50,6 +50,10 @@ System calls return non-negative results on success and `-errno` on failure.
 | `SYS_EXIT` | `60` | `93` | `void exit(int status)` |
 | `SYS_WAIT4` | `61` | `260` | `pid_t wait4(pid_t, int *, int, void *)` |
 | `SYS_OPENAT` | `257` | `56` | `int openat(int dirfd, const char *path, int flags, mode_t mode)` |
+| `SYS_WRITEV` | `20` | `66` | `ssize_t writev(int fd, const struct iovec *iov, int iovcnt)` |
+| `SYS_EXIT_GROUP` | `231` | `94` | `void exit_group(int status)` |
+| `SYS_GETCWD` | `79` | `17` | `char *getcwd(char *buf, size_t size)` |
+| `SYS_CHDIR` | `80` | `49` | `int chdir(const char *path)` |
 
 Omega input extensions use the reserved, architecture-independent range
 `0x4000`-`0x40ff` so the event ABI has the same numbers on x86_64, AArch64,
@@ -81,9 +85,9 @@ implementation milestones are complete.
 the process self-test on x86_64, AArch64, and RISC-V. Native entry,
 address-space mapping, static C startup, and process-exit handoff are also
 covered by the three-ISA integration tests. Scheduler-driven process switching
-and full multi-process signal semantics remain later work.
-`execve` still returns `-ENOSYS` because isolated ELF replacement is not
-implemented.
+and full multi-process signal semantics remain later work. The hosted command
+probe now verifies isolated replacement for `/bin/echo` with argv/envp on all
+three ISAs; broader replacement and supervision semantics remain incomplete.
 The former Omega numbers remain source-level compatibility aliases only.
 
 ## 3. Linux Users, Groups, Roles, and File Permissions
@@ -215,8 +219,10 @@ versions are not ABI-compatible with Omega.
 The first supported binary interchange target is a statically linked ELF64
 executable rebuilt for the Omega SDK syscall ABI. All three reference ISAs now
 map validated `PT_LOAD` segments, create a user stack, and enter a single PID 1
-init from the Omega initrd. Relocations beyond static link-time resolution,
-auxiliary vectors beyond `AT_NULL`, and signals remain pending.
+init from the Omega initrd. The hosted `/bin/echo` replacement probe exercises
+argv/envp-aware `execve`, `writev`, and `exit_group` on all three ISAs.
+Relocations beyond static link-time resolution, auxiliary vectors beyond
+`AT_NULL`, and signals remain pending.
 
 ### Shared objects and dynamic linking
 
