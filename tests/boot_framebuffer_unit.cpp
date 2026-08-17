@@ -1,7 +1,9 @@
 #include "vga_internal.hpp"
 
-extern "C" uint64_t multiboot_info_ptr = 0;
-extern "C" uint32_t multiboot_boot_magic = 0;
+extern "C" {
+uint64_t multiboot_info_ptr = 0;
+uint32_t multiboot_boot_magic = 0;
+}
 
 static void put32(uint8_t* p, uint32_t value) {
     p[0] = static_cast<uint8_t>(value); p[1] = static_cast<uint8_t>(value >> 8);
