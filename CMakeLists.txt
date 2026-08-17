@@ -31,6 +31,7 @@ set(FREESTANDING_FLAGS
     -nostdinc
     -Wall
     -Wextra
+    -Wno-unused-command-line-argument
 )
 
 include_directories(

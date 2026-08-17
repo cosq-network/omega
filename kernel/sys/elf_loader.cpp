@@ -322,7 +322,6 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
     cursor += sizeof(uint64_t);
 
     // auxv: AT_NULL only (musl reads AT_PAGESZ/AT_HWCAP; absent is fine).
-    const uintptr_t auxv_table = stack_page + cursor;
     stack_words[cursor / sizeof(uint64_t)] = 0;
     stack_words[cursor / sizeof(uint64_t) + 1] = 0;
     cursor += 2 * sizeof(uint64_t);
@@ -353,11 +352,6 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
     }
 
     stack_words[0x800 / sizeof(uint64_t)] = static_cast<uint64_t>(argc);
-    // The old fixed-offset ABI also exposed argv/envp/auxv pointers at
-    // 0x808/0x810/0x818; keep those for backward compat with omega_crt.c.
-    stack_words[0x808 / sizeof(uint64_t)] = argv_table;
-    stack_words[0x810 / sizeof(uint64_t)] = envp_table;
-    stack_words[0x818 / sizeof(uint64_t)] = auxv_table;
     *stack = stack_page + 0x800;
     process->user_stack = *stack;
     return true;

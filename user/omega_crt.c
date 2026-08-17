@@ -107,7 +107,10 @@ void exit(int status) { _exit(status); }
 
 void omega_start(uintptr_t* stack) {
     int argc = (int)stack[0];
-    char** argv = (char**)stack[1];
-    char** envp = (char**)stack[2];
+    // The kernel provides the conventional contiguous process stack:
+    // argc, argv[0..argc], NULL, envp[0..n], NULL, auxv. The first argv
+    // pointer is therefore stack[1], not a pointer-to-argv stored there.
+    char** argv = (char**)(stack + 1);
+    char** envp = argv + argc + 1;
     exit(main(argc, argv, envp));
 }

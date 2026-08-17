@@ -36,7 +36,7 @@ if [[ "${ARCH}" == riscv64 && -x /opt/homebrew/opt/llvm/bin/clang ]]; then
     CLANG_BIN=/opt/homebrew/opt/llvm/bin/clang
 fi
 INCLUDE="-I${PROJECT_ROOT}/user/include"
-COMMON="--target=${TARGET} -ffreestanding -fno-builtin -fno-stack-protector -nostdinc ${INCLUDE}"
+COMMON="--target=${TARGET} -ffreestanding -fno-builtin -fno-stack-protector -nostdinc -Wno-unused-command-line-argument ${INCLUDE}"
 
 ${CLANG_BIN} ${COMMON} ${EXTRA} -c "${PROJECT_ROOT}/user/omega_crt.c" -o "${BUILD_DIR}/omega_crt.o"
 ${CLANG_BIN} ${COMMON} ${EXTRA} -c "${PROJECT_ROOT}/user/init_c.c" -o "${BUILD_DIR}/init_c.o"

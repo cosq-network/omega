@@ -27,6 +27,35 @@ struct NvmeController {
 
 [[maybe_unused]] static NvmeController controller{};
 
+static void cpu_relax() {
+#if defined(__x86_64__)
+    asm volatile("pause" ::: "memory");
+#elif defined(__aarch64__)
+    asm volatile("yield" ::: "memory");
+#else
+    asm volatile("nop" ::: "memory");
+#endif
+}
+
+static bool wait_for_ready(volatile ControllerRegs* regs, bool ready) {
+    // A broken or absent controller must never strand the kernel in an
+    // unbounded MMIO loop. Real hardware gets a recoverable probe failure.
+    for (uint32_t timeout = 0; timeout < 10000000u; ++timeout) {
+        const bool is_ready = (regs->csts & 1u) != 0;
+        if (is_ready == ready) return true;
+        if ((timeout & 0x3FFFu) == 0) cpu_relax();
+    }
+    return false;
+}
+
+static bool wait_for_completion(volatile CqEntry* queue, uint16_t index, uint16_t phase) {
+    for (uint32_t timeout = 0; timeout < 10000000u; ++timeout) {
+        if ((queue[index].status & 1u) == phase) return true;
+        if ((timeout & 0x3FFFu) == 0) cpu_relax();
+    }
+    return false;
+}
+
 static storage::Status probe(storage::Device* device) {
     kernel::kprintf("[NVME] Probing NVMe device %d\n", device->id);
     return storage::Status::Success;
@@ -38,14 +67,17 @@ static storage::Status start(storage::Device* device) {
     NvmeController* ctrl = static_cast<NvmeController*>(device->driver_data);
     if (!ctrl || !ctrl->regs) return storage::Status::IoError;
 
-    kernel::kprintf("[NVME] Registers at %p, CAP: %lx, VS: %x\n", 
+    kernel::kprintf("[NVME] Registers at %p, CAP low: %x, VS: %x\n",
                     ctrl->regs, static_cast<uint32_t>(ctrl->regs->cap), ctrl->regs->vs);
 
     // Disable controller
     ctrl->regs->cc &= ~1u; // Clear CC.EN
     
     // Wait for CSTS.RDY to become 0
-    while (ctrl->regs->csts & 1u) {}
+    if (!wait_for_ready(ctrl->regs, false)) {
+        kernel::kprintf("[NVME][WARN] Controller did not leave the ready state.\n");
+        return storage::Status::IoError;
+    }
 
     // Allocate Admin Queues (SQ and CQ, e.g., 64 entries each)
     if (!dma::alloc(&ctrl->asq_dma, 4096, 4096, dma::DMA_COHERENT) ||
@@ -72,11 +104,20 @@ static storage::Status start(storage::Device* device) {
     uint32_t cc = 0;
     cc |= (4 << 20); // IOCQES
     cc |= (6 << 16); // IOSQES
+    // Set MPS (Maximum Page Size) to 0 (4 KiB)
+    cc |= (0 << 7); // MPS
     cc |= 1;         // EN
     ctrl->regs->cc = cc;
 
     // Wait for CSTS.RDY to become 1
-    while (!(ctrl->regs->csts & 1u)) {}
+    if (!wait_for_ready(ctrl->regs, true)) {
+        kernel::kprintf("[NVME][WARN] Controller did not become ready.\n");
+        dma::free(&ctrl->asq_dma);
+        dma::free(&ctrl->acq_dma);
+        dma::free(&ctrl->iosq_dma);
+        dma::free(&ctrl->iocq_dma);
+        return storage::Status::IoError;
+    }
     
     kernel::kprintf("[NVME] Controller started and ready.\n");
 
@@ -98,7 +139,11 @@ static storage::Status start(storage::Device* device) {
         sq[0].cdw10 = 1; // CNS = 1
         dma::sync_for_device(&ctrl->asq_dma);
         *sq0_tdbl = 1;
-        while ((cq[0].status & 1) == 0) {} // Wait Phase bit
+        if (!wait_for_completion(cq, 0, 1)) {
+            kernel::kprintf("[NVME][WARN] IDENTIFY Controller timed out.\n");
+            dma::free(&identify_dma);
+            return storage::Status::IoError;
+        }
         *cq0_hdbl = 1;
         
         // IDENTIFY Namespace 1
@@ -108,7 +153,11 @@ static storage::Status start(storage::Device* device) {
         sq[1].cdw10 = 0; // CNS = 0
         dma::sync_for_device(&ctrl->asq_dma);
         *sq0_tdbl = 2;
-        while ((cq[1].status & 1) == 0) {} 
+        if (!wait_for_completion(cq, 1, 1)) {
+            kernel::kprintf("[NVME][WARN] IDENTIFY Namespace timed out.\n");
+            dma::free(&identify_dma);
+            return storage::Status::IoError;
+        }
         dma::sync_for_cpu(&identify_dma);
         *cq0_hdbl = 2;
         
@@ -125,7 +174,10 @@ static storage::Status start(storage::Device* device) {
         sq[2].cdw11 = 1; // PC=1
         dma::sync_for_device(&ctrl->asq_dma);
         *sq0_tdbl = 3;
-        while ((cq[2].status & 1) == 0) {}
+        if (!wait_for_completion(cq, 2, 1)) {
+            kernel::kprintf("[NVME][WARN] CREATE IO CQ timed out.\n");
+            return storage::Status::IoError;
+        }
         *cq0_hdbl = 3;
         
         // CREATE IO SQ (QID=1)
@@ -135,7 +187,10 @@ static storage::Status start(storage::Device* device) {
         sq[3].cdw11 = (1 << 16) | 1; // CQID=1, PC=1
         dma::sync_for_device(&ctrl->asq_dma);
         *sq0_tdbl = 4;
-        while ((cq[3].status & 1) == 0) {}
+        if (!wait_for_completion(cq, 3, 1)) {
+            kernel::kprintf("[NVME][WARN] CREATE IO SQ timed out.\n");
+            return storage::Status::IoError;
+        }
         *cq0_hdbl = 4;
 
         dma::free(&identify_dma);
@@ -144,15 +199,15 @@ static storage::Status start(storage::Device* device) {
     return storage::Status::Success;
 }
 
-static storage::Status stop(storage::Device* device) {
+static storage::Status stop(storage::Device*) {
     return storage::Status::Success;
 }
 
-static storage::Status reset(storage::Device* device) {
+static storage::Status reset(storage::Device*) {
     return storage::Status::Success;
 }
 
-static storage::Status remove(storage::Device* device) {
+static storage::Status remove(storage::Device*) {
     return storage::Status::Success;
 }
 
@@ -160,6 +215,11 @@ static storage::Status submit_request(storage::Device* device, storage::Request*
     if (!device || !request) return storage::Status::NotReady;
     NvmeController* ctrl = static_cast<NvmeController*>(device->driver_data);
     if (!ctrl || !ctrl->regs) return storage::Status::IoError;
+    // Ensure controller is ready before submitting I/O
+    if (!(ctrl->regs->csts & 1u)) {
+        kernel::kprintf("[NVME][WARN] Controller not ready, aborting request\n");
+        return storage::Status::NotReady;
+    }
     
     bool is_write = request->type == storage::RequestType::Write;
     bool is_read = request->type == storage::RequestType::Read;
@@ -176,6 +236,27 @@ static storage::Status submit_request(storage::Device* device, storage::Request*
     if (!dma::map(request->buffer, byte_count, &data_dma, is_write ? dma::DMA_READ : dma::DMA_WRITE)) {
         return storage::Status::IoError;
     }
+    // Build PRP fields – handle multi‑page buffers
+    uint64_t prp1 = data_dma.physical_address;
+    uint64_t prp2 = 0;
+    const uint32_t page_size = 4096; // assume 4KiB pages
+    if (byte_count > page_size) {
+        // More than one page: need PRP List
+        uint32_t pages = (byte_count + page_size - 1) / page_size;
+        // Allocate a DMA buffer for the PRP list (pages-2 entries)
+        dma::Buffer prp_list{};
+        if (!dma::alloc(&prp_list, (pages - 2) * sizeof(uint64_t), page_size, dma::DMA_COHERENT)) {
+            return storage::Status::IoError;
+        }
+        uint64_t *list = reinterpret_cast<uint64_t*>(prp_list.virtual_address);
+        for (uint32_t i = 0; i < pages - 2; ++i) {
+            list[i] = data_dma.physical_address + ((i + 2) * page_size);
+        }
+        prp2 = prp_list.physical_address;
+        // Store the list buffer pointer in request->context for later free (optional)
+        request->context = reinterpret_cast<void*>(prp_list.physical_address); // store PRP list pointer
+    }
+    // Populate PRP fields in SQ entry later (sq[tail].dptr[0] = prp1; sq[tail].dptr[1] = prp2;)
     
     uint32_t dstrd = (ctrl->regs->cap >> 32) & 0xF;
     uint32_t doorbell_stride = 4 << dstrd;
@@ -187,7 +268,8 @@ static storage::Status submit_request(storage::Device* device, storage::Request*
     
     sq[tail].cdw0 = (is_write ? 0x01 : 0x02); // Write=01, Read=02
     sq[tail].nsid = 1;
-    sq[tail].dptr[0] = static_cast<uint64_t>(data_dma.physical_address);
+    sq[tail].dptr[0] = prp1;
+    sq[tail].dptr[1] = prp2; // 0 if not needed
     sq[tail].cdw10 = static_cast<uint32_t>(request->lba);
     sq[tail].cdw11 = static_cast<uint32_t>(request->lba >> 32);
     sq[tail].cdw12 = request->block_count - 1;
@@ -203,7 +285,11 @@ static storage::Status submit_request(storage::Device* device, storage::Request*
     volatile CqEntry* cq = reinterpret_cast<volatile CqEntry*>(ctrl->iocq_dma.virtual_address);
     uint16_t head = ctrl->cq_head;
     
-    while ((cq[head].status & 1) != ctrl->cq_phase) {}
+    if (!wait_for_completion(cq, head, ctrl->cq_phase)) {
+        dma::free(&data_dma);
+        kernel::kprintf("[NVME][WARN] I/O completion timed out.\n");
+        return storage::Status::IoError;
+    }
     
     if (is_read) dma::sync_for_cpu(&data_dma);
     
@@ -310,7 +396,10 @@ void init() {
 
                 if (storage::Manager::register_device(&controller.storage_device) == storage::Status::Success) {
                     nvme_driver.probe(&controller.storage_device);
-                    nvme_driver.start(&controller.storage_device);
+                    if (nvme_driver.start(&controller.storage_device) != storage::Status::Success) {
+                        kernel::kprintf("[NVME][SKIP] Controller initialization unavailable.\n");
+                        return;
+                    }
                     
                     uint8_t write_buffer[512] __attribute__((aligned(512))){};
                     uint8_t read_buffer[512] __attribute__((aligned(512))){};

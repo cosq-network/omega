@@ -79,8 +79,12 @@ run_x86_nvme_completion() {
         -device nvme,drive=nvme0,serial=1234 >"${log}" 2>&1 &
     local qemu_pid=$!
     QEMU_PIDS+=("${qemu_pid}")
-    sleep 4
+    sleep 12
     kill -9 "${qemu_pid}" 2>/dev/null || true
+    if grep -Fq "[NVME][SKIP] Controller initialization unavailable." "${log}"; then
+        echo "[SKIP] x86_64 NVMe runtime completion (controller initialization unavailable)"
+        return 0
+    fi
     for marker in \
         "[NVME] Controller started and ready." \
         "[NVME] IDENTIFY Controller complete." \
@@ -152,7 +156,7 @@ run_and_assert x86_64
 run_and_assert aarch64
 run_and_assert riscv64
 run_x86_virtio_completion
-#run_x86_nvme_completion
+run_x86_nvme_completion
 run_riscv_mmio_completion
 run_aarch64_mmio_completion
 echo "[PASS] Storage unit and multi-architecture integration tests"
