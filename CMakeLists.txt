@@ -8,6 +8,8 @@ option(ARCH "Target Architecture (x86_64, aarch64, riscv64)" "x86_64")
 option(ENABLE_EXPERIMENTAL_VIRTIO_GPU "Enable the in-kernel VirtIO-GPU MMIO bring-up path" OFF)
 option(ENABLE_EXPERIMENTAL_VIRTIO_BLOCK "Enable the in-kernel VirtIO-Block MMIO bring-up path" OFF)
 option(ENABLE_SCHEDULER_SELF_TEST "Run the x86_64 timer/context-switch self-test" OFF)
+option(OMEGA_BUILD_USERSPACE "Build the Omega musl sysroot and userspace tools" OFF)
+option(OMEGA_BUILD_TCC "Build the target TinyCC binary when userspace is enabled" OFF)
 message(STATUS "Configuring Omega Kernel for Architecture: ${ARCH}")
 
 find_program(LLD_PATH ld.lld PATHS /opt/homebrew/bin /usr/local/bin)
@@ -46,6 +48,7 @@ set(KERNEL_SOURCES
     kernel/sys/syscall.cpp
     kernel/sys/input.cpp
     kernel/sys/vfs.cpp
+    kernel/sys/tmpfs.cpp
     kernel/sys/ext4.cpp
     kernel/sys/initrd.cpp
     kernel/sys/dma.cpp
@@ -132,3 +135,23 @@ add_custom_target(omega.elf ALL
     DEPENDS kernel_objs
     COMMENT "Linking Omega kernel ELF binary with ld.lld"
 )
+
+if(OMEGA_BUILD_USERSPACE)
+    add_custom_target(omega-libc-${ARCH} ALL
+        COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_musl_sysroot.sh" "${ARCH}"
+        WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+        COMMENT "Building Omega musl sysroot for ${ARCH}"
+        VERBATIM)
+
+    if(OMEGA_BUILD_TCC)
+        add_custom_target(omega-tcc-${ARCH} ALL
+            COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_tcc.sh" "${ARCH}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            DEPENDS omega-libc-${ARCH}
+            COMMENT "Building TinyCC for Omega ${ARCH}"
+            VERBATIM)
+        add_custom_target(omega-userspace ALL DEPENDS omega-tcc-${ARCH})
+    else()
+        add_custom_target(omega-userspace ALL DEPENDS omega-libc-${ARCH})
+    endif()
+endif()

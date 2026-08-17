@@ -467,7 +467,7 @@ The kernel is approximately 20% of a production OS. Phase 10 builds the software
 
 | Milestone | Description | Key Components |
 | :--- | :--- | :--- |
-| **10.1.1 C Library** | POSIX-compatible libc (musl port or custom) | `pthread`, `malloc`, syscalls, errno, stdio |
+| **10.1.1 C Library** | **Static musl SDK implemented**; hosted POSIX expansion remains incremental | `pthread`, broader signals, dynamic linking, and full POSIX validation |
 | **10.1.2 Init System** | Service supervision and dependency ordering | Process 1, service units, restart policy |
 | **10.1.3 Device Manager** | Hotplug enumeration and driver binding | udev-style event dispatch |
 | **10.1.4 Core Daemons** | System services | `netd`, `powerd`, `logd`, `sessiond` |

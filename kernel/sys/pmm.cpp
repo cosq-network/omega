@@ -13,12 +13,19 @@ uint16_t PhysicalMemoryManager::refcounts[16384]{};
 void PhysicalMemoryManager::init(uintptr_t mem_start, size_t mem_size) {
     total_frames = mem_size / PAGE_SIZE;
     frame_base = mem_start;
+#if defined(__x86_64__)
+    // The bitmap is kept in kernel-owned storage so the kernel image and heap
+    // cannot overwrite allocator metadata; x86 frames still begin at the
+    // Keep allocations above the linked kernel image and the x86 initrd
+    // handoff window (0x600000). The original 2 MiB base overlaps .bss and
+    // silently corrupts allocator/process metadata.
+    frame_base = 0x800000ull;
+#endif
 #if defined(__aarch64__)
     frame_base = 0x42000000ull;
 #elif defined(__riscv)
     frame_base = 0x82000000ull;
 #endif
-    free_frames = total_frames;
     bitmap_size = total_frames / 8;
 
     bitmap = reinterpret_cast<uint8_t*>(mem_start);
@@ -29,10 +36,28 @@ void PhysicalMemoryManager::init(uintptr_t mem_start, size_t mem_size) {
         bitmap[i] = 0xFF;
     }
 
-    // Reserve bitmap memory frames
-    size_t bitmap_frames = (bitmap_size + PAGE_SIZE - 1) / PAGE_SIZE;
-    for (size_t i = bitmap_frames; i < total_frames; ++i) {
+    // Start with every managed frame free, then reserve the low bootstrap
+    // frames and the physical frames containing the bitmap itself.  The
+    // bitmap is not necessarily located at frame zero in the linked kernel;
+    // failing to reserve its actual location lets userspace overwrite the
+    // allocator metadata as soon as that frame is allocated.
+    free_frames = 0;
+    for (size_t i = 0; i < total_frames; ++i) {
         clear_bit(i);
+        ++free_frames;
+    }
+    const size_t bitmap_frames = (bitmap_size + PAGE_SIZE - 1) / PAGE_SIZE;
+    auto reserve = [&](size_t first, size_t count) {
+        for (size_t i = first; i < total_frames && i - first < count; ++i) {
+            if (!test_bit(i)) {
+                set_bit(i);
+                --free_frames;
+            }
+        }
+    };
+    reserve(0, bitmap_frames);
+    if (mem_start >= frame_base) {
+        reserve((mem_start - frame_base) / PAGE_SIZE, bitmap_frames);
     }
 
     kernel::kprintf("[+] Physical Memory Manager initialized.\n");

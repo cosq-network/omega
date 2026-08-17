@@ -7,6 +7,7 @@ namespace {
 struct InitrdEntry {
     vfs::VfsNode node;
     InitrdEntry* next;
+    InitrdEntry* children;
 };
 
 static InitrdEntry* entries = nullptr;
@@ -30,6 +31,88 @@ static int read_file(vfs::VfsNode* node, size_t offset, size_t size, uint8_t* bu
     const auto* data = reinterpret_cast<const uint8_t*>(node->fs_data);
     for (size_t i = 0; i < size; ++i) buffer[i] = data[offset + i];
     return static_cast<int>(size);
+}
+
+static void append_child(InitrdEntry*& list, InitrdEntry* child) {
+    child->next = nullptr;
+    if (!list) { list = child; return; }
+    auto* tail = list;
+    while (tail->next) tail = tail->next;
+    tail->next = child;
+}
+
+static InitrdEntry* new_directory(const char* name) {
+    auto* entry = reinterpret_cast<InitrdEntry*>(kmalloc(sizeof(InitrdEntry)));
+    if (!entry) return nullptr;
+    for (size_t i = 0; i < sizeof(entry->node.name); ++i) entry->node.name[i] = 0;
+    for (size_t i = 0; name[i] && i + 1 < sizeof(entry->node.name); ++i) entry->node.name[i] = name[i];
+    entry->node.type = vfs::DIRECTORY_TYPE;
+    entry->node.size = 0;
+    entry->node.flags = 0;
+    entry->node.uid = security::ROOT_UID;
+    entry->node.gid = security::ROOT_GID;
+    entry->node.mode = 0755;
+    entry->node.read = nullptr;
+    entry->node.write = nullptr;
+    entry->node.finddir = finddir;
+    entry->node.readdir = nullptr;
+    entry->node.create = nullptr;
+    entry->node.truncate = nullptr;
+    entry->node.fs_data = nullptr;
+    entry->children = nullptr;
+    entry->next = nullptr;
+    return entry;
+}
+
+static InitrdEntry* ensure_directory(InitrdEntry*& list, const char* name) {
+    for (auto* item = list; item; item = item->next) {
+        if (item->node.type != vfs::DIRECTORY_TYPE) continue;
+        size_t i = 0;
+        while (name[i] && item->node.name[i] && name[i] == item->node.name[i]) ++i;
+        if (!name[i] && !item->node.name[i]) return item;
+    }
+    auto* created = new_directory(name);
+    if (created) append_child(list, created);
+    return created;
+}
+
+static void add_file(InitrdEntry*& root, const char* path, const uint8_t* data, uint32_t size) {
+    char component[64]{};
+    InitrdEntry** list = &root;
+    size_t pos = 0;
+    while (path[pos]) {
+        while (path[pos] == '/') ++pos;
+        if (!path[pos]) break;
+        size_t length = 0;
+        while (path[pos] && path[pos] != '/' && length + 1 < sizeof(component)) component[length++] = path[pos++];
+        component[length] = '\0';
+        bool final = path[pos] == '\0';
+        if (final) {
+            auto* entry = reinterpret_cast<InitrdEntry*>(kmalloc(sizeof(InitrdEntry)));
+            if (!entry) return;
+            for (size_t i = 0; i < sizeof(entry->node.name); ++i) entry->node.name[i] = 0;
+            for (size_t i = 0; component[i] && i + 1 < sizeof(entry->node.name); ++i) entry->node.name[i] = component[i];
+            entry->node.type = vfs::FILE_TYPE;
+            entry->node.size = size;
+            entry->node.flags = 0;
+            entry->node.uid = security::ROOT_UID;
+            entry->node.gid = security::ROOT_GID;
+            entry->node.mode = 0755;
+            entry->node.read = read_file;
+            entry->node.write = nullptr;
+            entry->node.finddir = nullptr;
+            entry->node.readdir = nullptr;
+            entry->node.create = nullptr;
+            entry->node.truncate = nullptr;
+            entry->node.fs_data = const_cast<uint8_t*>(data);
+            entry->children = nullptr;
+            append_child(*list, entry);
+            return;
+        }
+        auto* directory = ensure_directory(*list, component);
+        if (!directory) return;
+        list = &directory->children;
+    }
 }
 }
 
@@ -72,23 +155,8 @@ vfs::VfsNode* Initrd::init(uintptr_t location) {
     auto* files = reinterpret_cast<const InitrdFileHeader*>(location + sizeof(InitrdHeader));
     for (uint32_t i = 0; i < header->nfiles; ++i) {
         if (files[i].magic != 0xBF || files[i].length == 0 || files[i].offset < sizeof(InitrdHeader)) continue;
-        auto* entry = reinterpret_cast<InitrdEntry*>(kmalloc(sizeof(InitrdEntry)));
-        if (entry == nullptr) break;
-        for (size_t j = 0; j < sizeof(entry->node.name); ++j) entry->node.name[j] = files[i].name[j];
-        entry->node.name[sizeof(entry->node.name) - 1] = '\0';
-        entry->node.type = vfs::FILE_TYPE;
-        entry->node.size = files[i].length;
-        entry->node.flags = 0;
-        entry->node.uid = security::ROOT_UID;
-        entry->node.gid = security::ROOT_GID;
-        entry->node.mode = 0755;
-        entry->node.read = read_file;
-        entry->node.write = nullptr;
-        entry->node.finddir = nullptr;
-        entry->node.fs_data = reinterpret_cast<void*>(location + files[i].offset);
-        entry->next = entries;
-        entries = entry;
-        kernel::kprintf("[+] Initrd file: %s (%u bytes)\n", entry->node.name, entry->node.size);
+        add_file(entries, files[i].name, reinterpret_cast<const uint8_t*>(location + files[i].offset), files[i].length);
+        kernel::kprintf("[+] Initrd file: %s (%u bytes)\n", files[i].name, files[i].length);
     }
     root->fs_data = entries;
     if (entries != nullptr) kernel::kprintf("[+] Initrd userspace files registered.\n");

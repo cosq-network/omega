@@ -10,6 +10,8 @@ This report summarizes the successful end-to-end design, implementation, and emp
 | Subsystem | x86_64 Target Status | AArch64 Target Status | Verification Environment |
 | :--- | :--- | :--- | :--- |
 | **Freestanding C++ Runtime** | Fully Operational | Fully Operational | Native Clang & LLVM `ld.lld` |
+| **Static musl SDK** | Build verified | Build verified | `scripts/test_libc_integration.sh` |
+| **TinyCC Omega Port** | Static ELF build verified | Static ELF build verified | x86_64/AArch64/RISC-V target builds |
 | **Early Console Output** | COM1 UART Driver (0x3F8) | PL011 UART Driver (0x09000000) | QEMU Serial Console |
 | **CPU Bootstrapping** | 64-bit Long Mode (PML4, PAE, EFER) | EL1 Execution (`CurrentEL` EL2->EL1) | QEMU `-kernel` Direct Boot |
 | **ELF Note Header** | Xen PVH `.xen_note` Header | Standard 64-bit ELF Entry | QEMU Bootloader |
@@ -30,6 +32,17 @@ This report summarizes the successful end-to-end design, implementation, and emp
 ---
 
 ## 2. Directory & Source Layout
+
+The static userspace SDK and TinyCC targets are built independently of the
+kernel image:
+
+```bash
+bash scripts/test_libc_integration.sh
+```
+
+This verifies `libc/omega-sdk/{x86_64,aarch64,riscv64}` and the corresponding
+static TinyCC ELFs. The SDK contains the musl archive, CRT, Omega shim,
+linker script, manifest, and (for AArch64/RISC-V) `libtcc1.a`.
 
 ```text
 omega/

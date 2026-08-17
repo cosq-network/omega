@@ -39,4 +39,9 @@ SECTIONS
         *(COMMON)
         *(.bss)
     } :data
+
+    .pmm_bitmap ALIGN(4K) :
+    {
+        *(.pmm_bitmap)
+    } :data
 }

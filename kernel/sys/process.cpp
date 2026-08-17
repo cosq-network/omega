@@ -75,21 +75,29 @@ void Manager::init() {
 
 Process* Manager::current() { return current_process; }
 
+uintptr_t Manager::tls_base() {
+    return current_process != nullptr ? current_process->tls_base : 0;
+}
+
 Process* Manager::create() {
     auto* process = reinterpret_cast<Process*>(kmalloc(sizeof(Process)));
     if (process == nullptr) return nullptr;
     process->pid = next_pid++;
     process->address_space = {0, false};
     process->next_mmap = USER_MMAP_BASE;
-    process->program_break = 0x60000000ull;
+    // Keep the initial brk below the high anonymous-mmap window and close to
+    // the user image, so musl mallocng's fixed guard pages use the same user
+    // page-table range on every ISA.
+    process->program_break = USER_MMAP_BASE - 0x01000000ull;
     process->alive = false;
     process->exited = false; process->exit_status = 0; process->parent = nullptr; process->child_count = 0;
     for (auto*& child : process->children) child = nullptr;
     process->credentials = security::Manager::current();
-    for (auto& fd : process->fd_table) fd = nullptr;
+    for (auto& fd : process->fd_table) { fd.node = nullptr; fd.offset = 0; fd.flags = 0; }
     process->mapping_count = 0;
     process->user_entry = 0;
     process->user_stack = 0;
+    process->tls_base = 0;
     if (!memory::VirtualMemoryManager::create_address_space(&process->address_space)) {
         kfree(process);
         return nullptr;
@@ -105,10 +113,18 @@ int64_t Manager::mmap(uintptr_t address, size_t length, uint32_t prot,
     if (!(flags & 0x20) && fd < 0) return -ERR_EINVAL; // MAP_ANONYMOUS
     length = align_up(length);
     if (length == 0 || length > USER_MMAP_LIMIT - USER_MMAP_BASE) return -ERR_EINVAL;
+    kernel::kprintf("[mmap] addr=%x len=%x prot=%x flags=%x\n", address, length, prot, flags);
 
     if (!(flags & MAP_FIXED)) address = current_process->next_mmap;
     address = address & ~(memory::PAGE_SIZE - 1);
-    if (address < USER_MMAP_BASE || address > USER_MMAP_LIMIT - length) return -ERR_EINVAL;
+    // musl mallocng uses a MAP_FIXED guard page immediately above its brk
+    // arena. Anonymous non-fixed mappings stay in the high per-process
+    // window, but fixed user mappings are also valid in the low heap range.
+    if ((flags & MAP_FIXED) == 0) {
+        if (address < USER_MMAP_BASE || address > USER_MMAP_LIMIT - length) return -ERR_EINVAL;
+    } else if (address < 0x100000ull || address > USER_MMAP_LIMIT - length) {
+        return -ERR_EINVAL;
+    }
     if (overlaps(current_process, address, length)) return -ERR_EEXIST;
 
     size_t mapped = 0;
@@ -167,6 +183,40 @@ int64_t Manager::brk(uintptr_t address) {
     if (current_process == nullptr) return -ERR_ENOMEM;
     if (address == 0) return static_cast<int64_t>(current_process->program_break);
     if (address < 0x100000ull || address >= USER_MMAP_BASE) return -ERR_EINVAL;
+    const uintptr_t old_break = current_process->program_break;
+    const uintptr_t old_page_end = align_up(old_break);
+    const uintptr_t new_page_end = align_up(address);
+    if (new_page_end > old_page_end) {
+        // Grow: map fresh zeroed pages from old_page_end up to new_page_end.
+        for (uintptr_t va = old_page_end; va < new_page_end; va += memory::PAGE_SIZE) {
+            const uintptr_t frame = memory::PhysicalMemoryManager::alloc_frame();
+            if (frame == 0) return -ERR_ENOMEM;
+            auto* page = reinterpret_cast<uint8_t*>(frame);
+            for (size_t i = 0; i < memory::PAGE_SIZE; ++i) page[i] = 0;
+            if (!memory::VirtualMemoryManager::map_page(&current_process->address_space, va, frame,
+                                                        memory::PAGE_PRESENT | memory::PAGE_USER | memory::PAGE_WRITABLE)) {
+                memory::PhysicalMemoryManager::free_frame(frame);
+                return -ERR_ENOMEM;
+            }
+            if (!add_mapping(current_process, va, memory::PAGE_SIZE)) return -ERR_ENOMEM;
+        }
+    } else if (new_page_end < old_page_end) {
+        // Shrink: unmap pages that fall outside the new break.
+        for (uintptr_t va = new_page_end; va < old_page_end; va += memory::PAGE_SIZE) {
+            for (uint32_t i = 0; i < current_process->mapping_count; ++i) {
+                if (current_process->mappings[i].address == va &&
+                    current_process->mappings[i].length == memory::PAGE_SIZE) {
+                    const uintptr_t frame = memory::VirtualMemoryManager::get_physical_address(
+                        &current_process->address_space, va);
+                    memory::VirtualMemoryManager::unmap_page(&current_process->address_space, va);
+                    if (frame != 0) memory::PhysicalMemoryManager::free_frame(frame);
+                    current_process->mappings[i] =
+                        current_process->mappings[--current_process->mapping_count];
+                    break;
+                }
+            }
+        }
+    }
     current_process->program_break = address;
     return static_cast<int64_t>(address);
 }
@@ -176,6 +226,8 @@ int64_t Manager::fork() {
     Process* parent=current_process; Process* child=create();
     if (!child || parent->child_count>=8) return -ERR_ENOMEM;
     child->parent=parent;
+    // Children inherit the parent's open file descriptors.
+    for (uint32_t i = 0; i < FD_TABLE_SIZE; ++i) child->fd_table[i] = parent->fd_table[i];
     for(uint32_t i=0;i<parent->mapping_count;++i){
         const Mapping&m=parent->mappings[i];
         for(size_t off=0;off<m.length;off+=memory::PAGE_SIZE){
@@ -254,6 +306,7 @@ int64_t Manager::self_test() {
         return -ERR_EINVAL;
     }
     kernel::kprintf("[TEST][PASS] Isolated process address-space map/unmap\n");
+    kernel::kprintf("[frames] after self-test part 1: free=%u\n", memory::PhysicalMemoryManager::get_free_frames());
     const int64_t cow_address = mmap(0, memory::PAGE_SIZE, PROT_READ | PROT_WRITE, 0x22, -1, 0);
     if (cow_address < 0) return cow_address;
     const uintptr_t original = memory::VirtualMemoryManager::get_physical_address(

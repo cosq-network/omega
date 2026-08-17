@@ -15,6 +15,7 @@ constexpr uint16_t ET_DYN = 3;
 constexpr uint32_t PT_LOAD = 1;
 constexpr uint32_t PT_DYNAMIC = 2;
 constexpr uint32_t PT_INTERP = 3;
+constexpr uint32_t PT_TLS = 7;
 constexpr uint32_t PF_X = 1;
 constexpr uint32_t PF_W = 2;
 #if defined(__x86_64__)
@@ -117,9 +118,34 @@ uintptr_t ElfLoader::load(const uint8_t* elf_data, size_t image_size) {
 
 bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
                            size_t image_size, uintptr_t* entry, uintptr_t* stack) {
+    // Default: single-arg boot path (argc=1, argv={"init"}).
+    static const char* init_argv[] = {"/init", nullptr};
+    static const char* init_envp[] = {nullptr};
+    return load_into(process, elf_data, image_size, entry, stack, 1, init_argv, init_envp);
+}
+
+bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
+                           size_t image_size, uintptr_t* entry, uintptr_t* stack,
+                           int argc, const char* const* argv, const char* const* envp) {
     if (process == nullptr || entry == nullptr || stack == nullptr ||
         !validate(elf_data, image_size)) return false;
     const auto* header = reinterpret_cast<const Elf64Header*>(elf_data);
+
+    // Parse PT_TLS: allocate a single TLS page (static TLS model: one block
+    // per process, laid out with the executable's TLS template copied in).
+    uint32_t tls_filesz = 0, tls_memsz = 0, tls_align = 1;
+    uintptr_t highest_load_end = 0;
+    for (uint16_t i = 0; i < header->e_phnum; ++i) {
+        const auto* ph = reinterpret_cast<const Elf64ProgramHeader*>(
+            elf_data + header->e_phoff + static_cast<size_t>(i) * header->e_phentsize);
+        if (ph->p_type == PT_TLS) {
+            tls_filesz = static_cast<uint32_t>(ph->p_filesz);
+            tls_memsz = static_cast<uint32_t>(ph->p_memsz);
+            tls_align = static_cast<uint32_t>(ph->p_align ? ph->p_align : 1);
+            if (tls_memsz == 0) tls_memsz = tls_filesz;
+        }
+    }
+
     for (uint16_t i = 0; i < header->e_phnum; ++i) {
         const auto* ph = reinterpret_cast<const Elf64ProgramHeader*>(
             elf_data + header->e_phoff + static_cast<size_t>(i) * header->e_phentsize);
@@ -128,6 +154,7 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
         const uintptr_t first = align_down(static_cast<uintptr_t>(ph->p_vaddr));
         const uintptr_t last = align_up(static_cast<uintptr_t>(ph->p_vaddr + ph->p_memsz));
         if (last == 0 || last <= first) return false;
+        if (last > highest_load_end) highest_load_end = last;
         uint32_t flags = memory::PAGE_PRESENT | memory::PAGE_USER;
         if (ph->p_flags & PF_W) flags |= memory::PAGE_WRITABLE;
         if (ph->p_flags & PF_X) flags |= memory::PAGE_EXEC;
@@ -138,6 +165,18 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
             if (frame == 0 || (new_page && !memory::VirtualMemoryManager::map_page(&process->address_space, address, frame, flags))) {
                 kernel::kprintf("[!] ELF map failed at %x\n", address);
                 return false;
+            }
+            // If the page was already mapped by an earlier segment (e.g. a
+            // shared boundary page between RX text and RW data), upgrade its
+            // flags to the union so writable data is actually writable.
+            if (!new_page) {
+                const uint32_t old_flags = memory::VirtualMemoryManager::get_page_flags(
+                    &process->address_space, address);
+                const uint32_t combined = old_flags | flags;
+                if (!memory::VirtualMemoryManager::set_page_flags(&process->address_space, address, combined)) {
+                    kernel::kprintf("[!] ELF flag upgrade failed at %x\n", address);
+                    return false;
+                }
             }
             auto* destination = reinterpret_cast<uint8_t*>(frame);
             if (new_page) for (size_t j = 0; j < memory::PAGE_SIZE; ++j) destination[j] = 0;
@@ -156,51 +195,171 @@ bool ElfLoader::load_into(process::Process* process, const uint8_t* elf_data,
         }
     }
 
+    // Keep anonymous mmap allocations after the loaded image. The initial
+    // mmap cursor is the image base for historical freestanding binaries;
+    // musl malloc requires that cursor to advance past a static ELF image.
+    if (highest_load_end > process->next_mmap) {
+        process->next_mmap = highest_load_end + memory::PAGE_SIZE;
+    }
+
+    // Allocate and initialize the TLS block (static TLS: copy template from
+    // the PT_TLS segment into a fresh page mapped in the user address space).
+    if (tls_memsz != 0) {
+        // Choose a fixed per-ISA TLS mapping address below the stack.
 #if defined(__riscv)
+        const uintptr_t tls_map_va = 0x000000006ffdd000ull;
+#elif defined(__aarch64__)
+        const uintptr_t tls_map_va = 0x0000006ffffd0000ull;
+#else
+        const uintptr_t tls_map_va = 0x0000400000001000ull;
+#endif
+        if (process->mapping_count >= 32) return false;
+        uintptr_t tls_frame = memory::VirtualMemoryManager::get_physical_address(&process->address_space, tls_map_va);
+        if (tls_frame == 0) {
+            tls_frame = memory::PhysicalMemoryManager::alloc_frame();
+            if (tls_frame == 0) return false;
+            if (!memory::VirtualMemoryManager::map_page(&process->address_space, tls_map_va, tls_frame,
+                                                        memory::PAGE_PRESENT | memory::PAGE_USER | memory::PAGE_WRITABLE)) {
+                memory::PhysicalMemoryManager::free_frame(tls_frame);
+                return false;
+            }
+            process->mappings[process->mapping_count++] = {tls_map_va, memory::PAGE_SIZE, false};
+        }
+        auto* tls_mem = reinterpret_cast<uint8_t*>(tls_frame);
+        for (size_t j = 0; j < memory::PAGE_SIZE; ++j) tls_mem[j] = 0;
+        if (tls_filesz != 0) {
+            for (uint16_t i = 0; i < header->e_phnum; ++i) {
+                const auto* ph = reinterpret_cast<const Elf64ProgramHeader*>(
+                    elf_data + header->e_phoff + static_cast<size_t>(i) * header->e_phentsize);
+                if (ph->p_type == PT_TLS) {
+                    for (uint32_t j = 0; j < tls_filesz; ++j)
+                        tls_mem[j] = elf_data[ph->p_offset + j];
+                    break;
+                }
+            }
+        }
+        // Static TLS base: end of the aligned TLS block within the page.
+        const size_t align = tls_align ? tls_align : 1;
+        const size_t tls_size = tls_memsz ? tls_memsz : tls_filesz;
+        const uintptr_t tls_base = tls_map_va + ((tls_size + align - 1) / align) * align;
+        process->tls_base = tls_base;
+        kernel::kprintf("[+] ELF PT_TLS: filesz=%u memsz=%u align=%u base=%x\n",
+                        tls_filesz, tls_memsz, tls_align, tls_base);
+    }
+
+#if defined(__riscv)
+    // RV64: user stack just below the user mmap limit (0x70000000).
     constexpr uintptr_t stack_top = 0x000000006ffff000ull;
 #elif defined(__aarch64__)
+    // AArch64: user stack just below the user mmap limit (0x7000000000).
     constexpr uintptr_t stack_top = 0x0000006fffff0000ull;
 #else
-    constexpr uintptr_t stack_top = 0x0000400000005000ull;
+    // x86_64: user stack just below the user mmap limit (0x700000000000).
+    // This is well above the ELF base (0x400000000000) so large static
+    // binaries (e.g. musl-linked) never collide with the stack page.
+    constexpr uintptr_t stack_top = 0x00006ffffffff000ull;
 #endif
+    constexpr size_t stack_pages = 16;
     constexpr uintptr_t stack_page = stack_top - memory::PAGE_SIZE;
-    const uintptr_t frame = memory::PhysicalMemoryManager::alloc_frame();
-    if (frame == 0 || !memory::VirtualMemoryManager::map_page(&process->address_space, stack_page, frame,
-                                                               memory::PAGE_PRESENT | memory::PAGE_USER | memory::PAGE_WRITABLE)) {
+    constexpr uintptr_t stack_base = stack_top - stack_pages * memory::PAGE_SIZE;
+    for (size_t page = 0; page < stack_pages; ++page) {
+        const uintptr_t frame = memory::PhysicalMemoryManager::alloc_frame();
+        const uintptr_t address = stack_base + page * memory::PAGE_SIZE;
+        if (frame == 0 || !memory::VirtualMemoryManager::map_page(
+                &process->address_space, address, frame,
+                memory::PAGE_PRESENT | memory::PAGE_USER | memory::PAGE_WRITABLE)) {
         kernel::kprintf("[!] ELF stack map failed at %x\n", stack_page);
-        return false;
+            return false;
+        }
+        auto* page_memory = reinterpret_cast<uint8_t*>(frame);
+        for (size_t i = 0; i < memory::PAGE_SIZE; ++i) page_memory[i] = 0;
     }
-    auto* stack_memory = reinterpret_cast<uint8_t*>(frame);
-    for (size_t i = 0; i < memory::PAGE_SIZE; ++i) stack_memory[i] = 0;
+    auto* stack_memory = reinterpret_cast<uint8_t*>(
+        memory::VirtualMemoryManager::get_physical_address(&process->address_space, stack_page));
+    if (stack_memory == nullptr) return false;
     if (process->mapping_count >= 32) return false;
-    process->mappings[process->mapping_count++] = {stack_page, memory::PAGE_SIZE, false};
+    process->mappings[process->mapping_count++] = {stack_base, stack_pages * memory::PAGE_SIZE, false};
     *entry = static_cast<uintptr_t>(header->e_entry);
     *stack = stack_page + 0x800;
     process->user_entry = *entry;
     process->user_stack = *stack;
 
-    // Omega initial process stack ABI:
-    //   argc, argv, envp, auxv; argv[0] points to /init; auxv ends AT_NULL.
+    // Omega/Linux initial process stack ABI (Linux-exact, contiguous):
+    //   [0x800] argc
+    //   [0x808] argv[0..argc] (NULL-terminated)
+    //   [0x808 + (argc+1)*8] envp[0..n] (NULL-terminated)
+    //   [after envp] auxv[0..] (AT_NULL terminated)
+    //   [after auxv] string data
+    // musl's __init_libc walks envp to find the auxv, so these MUST be
+    // contiguous with no padding.
     auto* stack_words = reinterpret_cast<uint64_t*>(stack_memory);
-    auto* argv = reinterpret_cast<uintptr_t*>(stack_memory + 0x880);
-    auto* envp = reinterpret_cast<uintptr_t*>(stack_memory + 0x890);
-    auto* auxv = reinterpret_cast<uintptr_t*>(stack_memory + 0x8a0);
-    auto* program = reinterpret_cast<char*>(stack_memory + 0x8c0);
-    const char init_name[] = "/init";
-    for (size_t i = 0; i < sizeof(init_name); ++i) program[i] = init_name[i];
-    const uintptr_t user_argv = stack_page + 0x880;
-    const uintptr_t user_envp = stack_page + 0x890;
-    const uintptr_t user_auxv = stack_page + 0x8a0;
-    const uintptr_t user_program = stack_page + 0x8c0;
-    argv[0] = user_program;
-    argv[1] = 0;
-    envp[0] = 0;
-    auxv[0] = 0;
-    auxv[1] = 0;
-    stack_words[0x800 / sizeof(uint64_t)] = 1;
-    stack_words[0x808 / sizeof(uint64_t)] = user_argv;
-    stack_words[0x810 / sizeof(uint64_t)] = user_envp;
-    stack_words[0x818 / sizeof(uint64_t)] = user_auxv;
+    const uintptr_t argv_table = stack_page + 0x808;
+    uintptr_t cursor = 0x808;
+
+    if (argc < 0) argc = 0;
+    if (argc > 64) argc = 64;
+
+    // argv table
+    for (int i = 0; i < argc; ++i) {
+        stack_words[cursor / sizeof(uint64_t)] = 0;
+        cursor += sizeof(uint64_t);
+    }
+    stack_words[cursor / sizeof(uint64_t)] = 0; // argv NULL terminator
+    cursor += sizeof(uint64_t);
+
+    // envp table (empty for now — the boot path passes none)
+    const uintptr_t envp_table = stack_page + cursor;
+    (void)envp_table;
+    int env_count = 0;
+    if (envp) {
+        while (envp[env_count] && env_count < 64) {
+            stack_words[cursor / sizeof(uint64_t)] = 0; // filled after strings
+            ++env_count;
+            cursor += sizeof(uint64_t);
+        }
+    }
+    stack_words[cursor / sizeof(uint64_t)] = 0; // envp NULL terminator
+    cursor += sizeof(uint64_t);
+
+    // auxv: AT_NULL only (musl reads AT_PAGESZ/AT_HWCAP; absent is fine).
+    const uintptr_t auxv_table = stack_page + cursor;
+    stack_words[cursor / sizeof(uint64_t)] = 0;
+    stack_words[cursor / sizeof(uint64_t) + 1] = 0;
+    cursor += 2 * sizeof(uint64_t);
+
+    // Strings start after the tables.
+    uintptr_t string_cursor = stack_page + cursor;
+
+    // Fill argv strings.
+    for (int i = 0; i < argc; ++i) {
+        if (argv && argv[i]) {
+            stack_words[(argv_table - stack_page) / sizeof(uint64_t) + i] = string_cursor;
+            const char* s = argv[i];
+            auto* dst = reinterpret_cast<char*>(stack_memory + (string_cursor - stack_page));
+            while (*s) { *dst++ = *s++; ++string_cursor; }
+            *dst = '\0'; ++string_cursor;
+        }
+    }
+
+    // Fill envp strings.
+    if (envp) {
+        for (int i = 0; i < env_count; ++i) {
+            stack_words[(envp_table - stack_page) / sizeof(uint64_t) + i] = string_cursor;
+            const char* s = envp[i];
+            auto* dst = reinterpret_cast<char*>(stack_memory + (string_cursor - stack_page));
+            while (*s) { *dst++ = *s++; ++string_cursor; }
+            *dst = '\0'; ++string_cursor;
+        }
+    }
+
+    stack_words[0x800 / sizeof(uint64_t)] = static_cast<uint64_t>(argc);
+    // The old fixed-offset ABI also exposed argv/envp/auxv pointers at
+    // 0x808/0x810/0x818; keep those for backward compat with omega_crt.c.
+    stack_words[0x808 / sizeof(uint64_t)] = argv_table;
+    stack_words[0x810 / sizeof(uint64_t)] = envp_table;
+    stack_words[0x818 / sizeof(uint64_t)] = auxv_table;
+    *stack = stack_page + 0x800;
+    process->user_stack = *stack;
     return true;
 }
 

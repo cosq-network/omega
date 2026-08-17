@@ -26,6 +26,11 @@ SECTIONS
         *(.bss)
     }
 
+    .pmm_bitmap : ALIGN(4K)
+    {
+        *(.pmm_bitmap)
+    }
+
     .boot_stack (NOLOAD) : ALIGN(16)
     {
         *(.boot_stack)

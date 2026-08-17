@@ -37,6 +37,21 @@ enum SyscallNumber {
     SYS_SETRESGID  = 119,
     SYS_FCHOWNAT   = 260,
     SYS_FCHMODAT   = 268,
+    SYS_FSTAT      = 5,
+    SYS_LSEEK      = 8,
+    SYS_RT_SIGACTION = 13,
+    SYS_IOCTL      = 16,
+    SYS_DUP2       = 33,
+    SYS_GETPID     = 39,
+    SYS_UNAME      = 63,
+    SYS_FCNTL      = 72,
+    SYS_GETDENTS64 = 217,
+    SYS_CLOCK_GETTIME = 228,
+    SYS_PIPE2      = 293,
+    SYS_SET_TID_ADDRESS = 218,
+#if defined(__x86_64__)
+    SYS_ARCH_PRCTL = 158,
+#endif
 #else
     // Linux AArch64 and RV64 use the same modern syscall numbering for this
     // subset. fork is represented by clone in those ABIs.
@@ -69,6 +84,18 @@ enum SyscallNumber {
     SYS_SETRESGID  = 149,
     SYS_GETGROUPS  = 158,
     SYS_SETGROUPS  = 159,
+    SYS_FSTAT      = 80,
+    SYS_LSEEK      = 62,
+    SYS_RT_SIGACTION = 134,
+    SYS_IOCTL      = 29,
+    SYS_DUP2       = 24,
+    SYS_GETPID     = 172,
+    SYS_UNAME      = 160,
+    SYS_FCNTL      = 25,
+    SYS_GETDENTS64 = 61,
+    SYS_CLOCK_GETTIME = 113,
+    SYS_PIPE2      = 59,
+    SYS_SET_TID_ADDRESS = 96,
 #endif
 #if !defined(__x86_64__)
     SYS_OPEN       = 1024, // deprecated Omega compatibility entry

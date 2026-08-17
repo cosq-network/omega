@@ -44,6 +44,30 @@ assembly startup/syscall stub rather than a general libc. COW `fork`,
 `wait4`, signals, dynamic linking, and native AArch64/RISC-V userspace remain
 future milestones.
 
+### musl and TinyCC SDKs
+
+Build the static musl SDK and target TinyCC binaries for all reference ISAs:
+
+```bash
+bash scripts/test_libc_integration.sh
+```
+
+Individual builds are available when iterating:
+
+```bash
+bash scripts/build_musl_sysroot.sh x86_64
+bash scripts/build_musl_sysroot.sh aarch64
+bash scripts/build_musl_sysroot.sh riscv64
+bash scripts/build_tcc.sh x86_64
+bash scripts/build_tcc.sh aarch64
+bash scripts/build_tcc.sh riscv64
+```
+
+The generated SDKs live under `libc/omega-sdk/<isa>/`; target compiler
+intermediates live under `build/tcc-<isa>/`. CMake users can enable the same
+workflow with `-DOMEGA_BUILD_USERSPACE=ON` and optionally
+`-DOMEGA_BUILD_TCC=ON`.
+
 **Automated tests:**
 
 ```bash

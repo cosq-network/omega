@@ -5,6 +5,7 @@
 #include "kernel/scheduler.hpp"
 #include "kernel/syscall.hpp"
 #include "kernel/vfs.hpp"
+#include "kernel/tmpfs.hpp"
 #include "kernel/initrd.hpp"
 #include "kernel/userland.hpp"
 #include "kernel/elf_loader.hpp"
@@ -26,9 +27,10 @@
 
 // Static Heap Allocation Buffer (1 MB) to guarantee physical memory availability across architectures
 static uint8_t kernel_heap_buffer[1024 * 1024] __attribute__((aligned(8)));
-#if !defined(__x86_64__)
-static uint8_t pmm_bitmap_buffer[4096] __attribute__((aligned(4096)));
-#endif
+// Keep allocator metadata outside the general BSS/heap region.  The linker
+// places this section after BSS so the heap cannot consume the bitmap.
+static uint8_t pmm_bitmap_buffer[4096]
+    __attribute__((aligned(4096), section(".pmm_bitmap")));
 
 #if defined(OMEGA_ENABLE_SCHEDULER_SELF_TEST) && defined(__x86_64__)
 static volatile uint32_t scheduler_test_a = 0;
@@ -118,12 +120,9 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
     // PMM/VMM must be ready before framebuffer mapping (may lie above 1 GiB).
     // The early RISC-V/AArch64 QEMU handoff does not yet establish a broad
     // physical identity map. Keep the PMM bitmap in kernel-owned RAM until
-    // the real VMM is active; x86 retains its historical low-memory address.
-#if defined(__x86_64__)
-    memory::PhysicalMemoryManager::init(0x200000, 32 * 1024 * 1024);
-#else
+    // the real VMM is active; the bitmap remains in kernel-owned storage on
+    // every architecture.
     memory::PhysicalMemoryManager::init(reinterpret_cast<uintptr_t>(pmm_bitmap_buffer), 32 * 1024 * 1024);
-#endif
     memory::VirtualMemoryManager::init();
 
 
@@ -232,6 +231,8 @@ extern "C" void kernel_main(uintptr_t boot_fdt) {
     if (ext4::mount(storage::Manager::find_by_name("virtio0"), nullptr) == storage::Status::Success) {
         kernel::kprintf("[TEST][PASS] ext4 root filesystem mounted\n");
     }
+    // Writable scratch space for userspace (on-target compiler output, etc.).
+    tmpfs::mount("/tmp");
 
     // QEMU places initrd images in the platform RAM window.
 #if defined(__riscv)
