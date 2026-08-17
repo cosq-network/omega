@@ -11,13 +11,27 @@ for arch in aarch64 riscv64; do
     cmake --build "$build_dir" >/dev/null
 done
 
-for spec in \
-    "aarch64:qemu-system-aarch64 -M virt -cpu cortex-a57 -nographic -kernel $PROJECT_ROOT/build/aarch64-gpu-review/omega.elf -device virtio-gpu-device" \
-    "riscv64:qemu-system-riscv64 -M virt -cpu rv64 -bios default -nographic -kernel $PROJECT_ROOT/build/riscv64-gpu-review/omega.elf -device virtio-gpu-device"; do
-    arch="${spec%%:*}"
-    command_line="${spec#*:}"
+for arch in aarch64 riscv64; do
+    if [[ "${arch}" == "aarch64" ]]; then
+        qemu_bin=qemu-system-aarch64
+        qemu_machine="-M virt -cpu cortex-a57 -nographic"
+    else
+        qemu_bin=qemu-system-riscv64
+        qemu_machine="-M virt -cpu rv64 -bios default -nographic"
+    fi
+    device_model=""
+    if "${qemu_bin}" -device help 2>&1 | grep -Fq 'name "virtio-gpu-device"'; then
+        device_model=virtio-gpu-device
+    elif "${qemu_bin}" -device help 2>&1 | grep -Fq 'name "virtio-gpu-pci"'; then
+        device_model=virtio-gpu-pci
+    else
+        echo "[SKIP] ${arch} VirtIO-GPU probe (QEMU has no supported VirtIO-GPU device model)"
+        continue
+    fi
     log_file="$PROJECT_ROOT/build/${arch}_gpu_display_test.log"
-    sh -c "$command_line" >"$log_file" 2>&1 &
+    "${qemu_bin}" ${qemu_machine} \
+        -kernel "$PROJECT_ROOT/build/${arch}-gpu-review/omega.elf" \
+        -device "${device_model}" >"$log_file" 2>&1 &
     qemu_pid=$!
     # GitHub-hosted runners can take longer to initialize QEMU than a local
     # workstation, especially for the AArch64 and RISC-V virtio-gpu device.
