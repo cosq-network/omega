@@ -10,6 +10,7 @@ option(ENABLE_EXPERIMENTAL_VIRTIO_BLOCK "Enable the in-kernel VirtIO-Block MMIO 
 option(ENABLE_SCHEDULER_SELF_TEST "Run the x86_64 timer/context-switch self-test" OFF)
 option(OMEGA_BUILD_USERSPACE "Build the Omega musl sysroot and userspace tools" OFF)
 option(OMEGA_BUILD_TCC "Build the target TinyCC binary when userspace is enabled" OFF)
+option(OMEGA_BUILD_BASH "Build the static non-interactive Bash profile when userspace is enabled" OFF)
 message(STATUS "Configuring Omega Kernel for Architecture: ${ARCH}")
 
 find_program(LLD_PATH ld.lld PATHS /opt/homebrew/bin /usr/local/bin)
@@ -151,6 +152,14 @@ if(OMEGA_BUILD_USERSPACE)
             COMMENT "Building TinyCC for Omega ${ARCH}"
             VERBATIM)
         add_custom_target(omega-userspace ALL DEPENDS omega-tcc-${ARCH})
+    elseif(OMEGA_BUILD_BASH)
+        add_custom_target(omega-bash-${ARCH} ALL
+            COMMAND "${CMAKE_CURRENT_SOURCE_DIR}/scripts/build_bash.sh" "${ARCH}"
+            WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
+            DEPENDS omega-libc-${ARCH}
+            COMMENT "Building static non-interactive Bash for Omega ${ARCH}"
+            VERBATIM)
+        add_custom_target(omega-userspace ALL DEPENDS omega-bash-${ARCH})
     else()
         add_custom_target(omega-userspace ALL DEPENDS omega-libc-${ARCH})
     endif()

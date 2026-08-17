@@ -10,7 +10,7 @@
 | Initial installation path | `/bin/bash` |
 | Initial shell contract | Non-interactive `bash -c` execution |
 | Final shell contract | Interactive Bash on an Omega TTY with job control |
-| Status | Planning; no Bash port is currently claimed |
+| Status | B0 and B2 implemented; B3 runtime execution remains blocked by process/exec work |
 | Primary dependencies | [`libc-integration.md`](libc-integration.md), [`ON_TARGET_COMPILER_PLAN.md`](ON_TARGET_COMPILER_PLAN.md), [`ABI.md`](ABI.md) |
 
 This document is the execution plan for porting Bash to Omega. It is deliberately
@@ -30,6 +30,18 @@ The first two deliverables can be completed without a full terminal subsystem.
 The third cannot. Bash's interactive behavior depends on operating-system
 support for terminals, signals, sessions, and process groups; it is not only a
 userspace parser feature.
+
+### Current implementation status
+
+- `scripts/build_bash.sh` implements the first static, non-interactive profile.
+- Bash 5.3 builds successfully for x86_64, AArch64, and RISC-V 64.
+- `scripts/test_bash_build.sh` validates the three static ELF artifacts and
+  their manifests.
+- `CMakeLists.txt` exposes `OMEGA_BUILD_BASH=ON` under
+  `OMEGA_BUILD_USERSPACE=ON`.
+- The artifacts are not yet booted by Omega. B3 is blocked until general
+  `execve`, process replacement, and the shell's runtime syscall set are
+  complete.
 
 ## 1. Scope and non-goals
 
