@@ -27,6 +27,7 @@ incomplete.
 | **Userspace Bootstrap** | Static ELF `PT_LOAD`, PID 1, initial stack ABI, native privilege transitions and syscalls | All three reference ISAs verified |
 | **Static musl SDK** | Host-built musl `libc.a`, CRT, syscall shim, linker script, and manifest | x86_64, AArch64, RISC-V build verified |
 | **TinyCC Omega Port** | Static target compiler plus AArch64/RISC-V `libtcc1.a` runtime | All three target ELFs build verified |
+| **Bash Porting Plan** | Detailed staged plan for Bash script execution, pipelines, TTYs, signals, Readline, and job control | Planned; see `BASH_PORTING_PLAN.md` |
 | **Storage Architecture** | Pluggable block-device, transport, partition, filesystem, DMA, and hotplug plan | Planned |
 | **Communications Architecture** | Generic serial, Ethernet, USB 2/3, USB Type-C, and 2.4/5 GHz Wi-Fi integration plan | Planned |
 | **Pointing Devices Architecture** | Generic mouse, touchpad, touchscreen, HID, PS/2, I²C/SPI, calibration, gestures, and input-service plan | Planned |
