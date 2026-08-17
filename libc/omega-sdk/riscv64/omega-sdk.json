@@ -1,0 +1,9 @@
+{
+  "name": "omega-posix-static",
+  "architecture": "riscv64",
+  "target": "riscv64-unknown-none-elf",
+  "musl_version": "1.2.5",
+  "static": true,
+  "dynamic_linking": false,
+  "artifacts": ["include", "lib/libc.a", "lib/crt1.o", "lib/libomega-shim.a", "lib/omega.ld"]
+}

@@ -148,6 +148,9 @@ paging_done:
     /* Enable PAE in CR4 */
     mov %cr4, %eax
     or $0x20, %eax
+    /* Enable SSE: CR4.OSFXSR (bit 9) + OSXMMEXCPT (bit 10). Required for
+       libc code (musl emits SSE for memcpy/strings) to run in userspace. */
+    or $0x600, %eax
     mov %eax, %cr4
 
     /* Set Long Mode Bit in EFER MSR (0xC0000080) */
@@ -157,9 +160,9 @@ paging_done:
     or $0x900, %eax
     wrmsr
 
-    /* Enable Paging in CR0 */
+    /* Enable Paging in CR0, plus MP (bit 1) for SSE co-existence. */
     mov %cr0, %eax
-    or $0x80000001, %eax
+    or $0x80000003, %eax
     mov %eax, %cr0
 
     /* Load 64-bit GDT */

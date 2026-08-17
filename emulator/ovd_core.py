@@ -23,6 +23,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+# Optional psutil import for robust PID validation on macOS/Linux.
+try:
+    import psutil
+except ImportError:
+    psutil = None
+
 
 ARCHITECTURES = {"x86_64", "aarch64", "armv7", "riscv64"}
 STORAGE_PROFILES = {"auto", "virtio", "ahci", "usb", "sd", "optical", "none"}
@@ -414,9 +420,19 @@ class QemuBackend:
 
 
 class OVDManager:
+    """High‑level manager for Omega Virtual Devices.
+
+    It encapsulates OVD lifecycle operations (create, start, stop, export,
+    import) and provides a thin façade over the underlying :class:`QemuBackend`.
+    The class is deliberately lightweight so that it can be instantiated from
+    scripts, the CLI, or programmatic callers.
+    """
+
     def __init__(self, root: Path | None = None):
-        self.root = (root or root_from_environment()).resolve(); self.root.mkdir(parents=True, exist_ok=True)
-        self.catalog = ProfileCatalog(project_root()); self.qemu = QemuBackend(self)
+        self.root = (root or root_from_environment()).resolve()
+        self.root.mkdir(parents=True, exist_ok=True)
+        self.catalog = ProfileCatalog(project_root())
+        self.qemu = QemuBackend(self)
 
     def path(self, name: str) -> Path: return self.root / validate_name(name)
     def kernel(self, arch: str) -> Path: return build_root() / arch / "omega.elf"
@@ -489,9 +505,16 @@ class OVDManager:
 
     @staticmethod
     def process_matches(ovd: OVD, pid: int) -> bool:
-        """Verify that a persisted PID still belongs to this OVD when possible."""
+        """Verify that a persisted PID still belongs to this OVD.
+
+        The original implementation relied on reading ``/proc/<pid>/cmdline`` which
+        is unavailable on macOS.  We now fall back to using ``psutil`` (if installed)
+        to inspect the process command line, otherwise we simply verify that the PID
+        exists and matches the stored metadata.
+        """
         if pid <= 0:
             return False
+        # Quick existence check – works on all POSIX platforms.
         try:
             os.kill(pid, 0)
         except OSError:
@@ -506,15 +529,27 @@ class OVDManager:
             return False
         if int(metadata.get("pid", -1)) != pid:
             return False
-        proc_cmdline = Path(f"/proc/{pid}/cmdline")
-        if proc_cmdline.is_file():
+        # Platform‑specific command‑line verification.
+        if psutil is not None:
             try:
-                command = proc_cmdline.read_bytes().replace(b"\0", b" ").strip()
-                expected = str(metadata.get("executable", "")).encode()
-                if expected and expected not in command:
+                proc = psutil.Process(pid)
+                cmdline = " ".join(proc.cmdline())
+                expected = str(metadata.get("executable", ""))
+                if expected and expected not in cmdline:
                     return False
-            except OSError:
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
                 return False
+        else:
+            # Fallback for systems without /proc (e.g., macOS) or psutil.
+            proc_cmdline = Path(f"/proc/{pid}/cmdline")
+            if proc_cmdline.is_file():
+                try:
+                    command = proc_cmdline.read_bytes().replace(b"\0", b" ").strip()
+                    expected = str(metadata.get("executable", "")).encode()
+                    if expected and expected not in command:
+                        return False
+                except OSError:
+                    return False
         return True
 
     def validate(self, name: str, skip_image: bool = False) -> OVD:

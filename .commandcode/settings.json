@@ -1,0 +1,38 @@
+{
+  "permissions": {
+    "allow": [
+      "Shell(cmake:*)",
+      "Shell(bash scripts/test_c_sdk.sh 2 >& 1)",
+      "Shell(bash scripts/test_c_sdk.sh > /tmp/csdk.log 2>&1; echo \"exit=$?\"; tail -30 /tmp/csdk.log)",
+      "Shell(qemu-system-x86_64:*)",
+      "Shell(sleep:*)",
+      "Shell(kill:*)",
+      "Shell(grep:*)",
+      "Shell(llvm-objdump:*)",
+      "Shell(llvm-addr2line:*)",
+      "Shell(git:*)",
+      "Shell(/opt/homebrew/opt/llvm/bin/llvm-nm:*)",
+      "Shell(awk:*)",
+      "Shell(which clang ld.lld llvm-ar llvm-ranlib git make 2>&1; echo \"---musl check---\"; ls /opt/homebrew/opt/llvm/bin/ 2>/dev/null | grep -E \"^(clang|ld.lld|llvm-ar|llvm-ranlib)$\"; echo \"---git---\"; git --version)",
+      "Shell(ls:*)",
+      "Shell(mkdir:*)",
+      "Shell(chmod:*)",
+      "Shell(bash scripts/build_musl_sysroot.sh x86_64 2 >& 1)",
+      "Shell(rm:*)",
+      "Shell(bash scripts/build_musl_sysroot.sh x86_64 --rebuild 2 >& 1)",
+      "Shell(cd build/musl-x86_64 && make AR=\"$(command -v llvm-ar)\" RANLIB=\"$(command -v llvm-ranlib)\" 2>&1 | grep -B2 -A4 \"Error\\|error\" | head -30)",
+      "Shell(/opt/homebrew/opt/llvm/bin/clang:*)",
+      "Shell(bash scripts/build_musl_sysroot.sh riscv64 --rebuild 2 >& 1)",
+      "Shell(tail:*)",
+      "Shell(export:*)",
+      "Shell(/opt/homebrew/bin/ld.lld:*)",
+      "Shell(python3 scripts/create_initrd.py build/musl-test/initrd.img build/musl-test/hello.elf)",
+      "Shell(find /Users/benoybose/Projects/omega/libc/musl/src -name \"*libc_start*\" -o -name \"*start_main*\" 2>/dev/null; echo \"---\"; grep -rl \"__libc_start_main\" /Users/benoybose/Projects/omega/libc/musl/src/startup/ 2>/dev/null | head)",
+      "Shell(python3 scripts/create_initrd.py build/musl-test/initrd-nm.img build/musl-test/nomalloc.elf)",
+      "Shell(cd /Users/benoybose/Projects/omega && find libc/musl/arch/x86_64 -name \"*.h\" | head; echo \"---\"; ls libc/musl/arch/x86_64/bits/ 2>/dev/null; echo \"--- in build obj ---\"; find build/musl-x86_64/obj -name \"posix.h\" 2>/dev/null | head)",
+      "Shell(/opt/homebrew/opt/llvm/bin/llvm-objdump:*)"
+    ],
+    "deny": [],
+    "defaultMode": "default"
+  }
+}
