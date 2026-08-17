@@ -1,6 +1,7 @@
 # Build Output Directories
 build/
 userland/bash/
+userland/commands/
 bin/
 out/
 

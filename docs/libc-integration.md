@@ -25,6 +25,13 @@ Dynamic linking, complete `execve`-driven process replacement, persistent
 ext4 creation, and the complete LIBC-1..10 QEMU matrix remain follow-up work.
 The phase tables below are retained as the roadmap for those features.
 
+The first standalone musl-linked POSIX command slice is now available through
+`scripts/build_commands.sh` and `scripts/test_commands_build.sh`. It produces
+`ls`, `dir`, `ln`, `pwd`, `cat`, `mkdir`, `rm`, `rmdir`, `mv`, `echo`, `true`,
+`false`, `env`, and `test` for all three ISAs. This is a build/link milestone,
+not a claim of complete command runtime support; see
+[`POSIX_COMMANDS_PORTING_PLAN.md`](POSIX_COMMANDS_PORTING_PLAN.md).
+
 ## 1. Purpose and Positioning
 
 Omega currently builds as a **freestanding** kernel: the userspace runtime
@@ -339,9 +346,11 @@ The top-level `CMakeLists.txt` will include userspace targets conditionally:
 ```cmake
 option(OMEGA_BUILD_USERSPACE "Build the Omega musl sysroot and userspace tools" OFF)
 option(OMEGA_BUILD_TCC "Build the target TinyCC binary when userspace is enabled" OFF)
+option(OMEGA_BUILD_BASH "Build the static non-interactive Bash profile when userspace is enabled" OFF)
+option(OMEGA_BUILD_COMMANDS "Build the static POSIX command suite when userspace is enabled" OFF)
 if(OMEGA_BUILD_USERSPACE)
-    # The top-level build creates omega-libc-${ARCH}; with TCC enabled it also
-    # creates omega-tcc-${ARCH} and omega-userspace.
+    # The top-level build creates omega-libc-${ARCH}; TCC, Bash, and commands
+    # can be enabled independently and are collected by omega-userspace.
 endif()
 ```
 

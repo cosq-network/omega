@@ -26,6 +26,7 @@ incomplete.
 | **RAM Disk (Initrd)** | Memory file tree with matching-ISA `/init` artifact loading | All three reference ISAs verified |
 | **Userspace Bootstrap** | Static ELF `PT_LOAD`, PID 1, initial stack ABI, native privilege transitions and syscalls | All three reference ISAs verified |
 | **Static musl SDK** | Host-built musl `libc.a`, CRT, syscall shim, linker script, and manifest | x86_64, AArch64, RISC-V build verified |
+| **Static POSIX commands** | 14 standalone musl-linked utilities for the three reference ISAs | ELF build validation complete; runtime filesystem coverage remains in progress |
 | **TinyCC Omega Port** | Static target compiler plus AArch64/RISC-V `libtcc1.a` runtime | All three target ELFs build verified |
 | **Bash Porting Plan** | Detailed staged plan for Bash script execution, pipelines, TTYs, signals, Readline, and job control | Planned; see `BASH_PORTING_PLAN.md` |
 | **Storage Architecture** | Pluggable block-device, transport, partition, filesystem, DMA, and hotplug plan | Planned |

@@ -436,6 +436,15 @@ basename dirname
 Each utility should have an explicit Omega source/build entry and an ELF
 manifest. Avoid depending on Bash-specific behavior in utility test scripts.
 
+The initial standalone implementation of `ls`, `dir`, `ln`, `pwd`, `cat`,
+`mkdir`, `rm`, `rmdir`, `mv`, `echo`, `true`, `false`, `env`, and `test` is now
+provided by `scripts/build_commands.sh` and validated for all three target
+ISAs by `scripts/test_commands_build.sh`. The remaining bootstrap entries
+(`printf`, `[`, `head`, `tail`, `cp`, `sleep`, `kill`, `basename`, and
+`dirname`) remain follow-up work. This build milestone does not imply that
+Bash can yet execute external commands under QEMU; incomplete `execve`,
+current-directory, and filesystem mutation paths remain hard gates.
+
 ### Required shell-visible files
 
 ```text
@@ -767,6 +776,7 @@ Everything in the script release, plus:
 | [`libc-integration.md`](libc-integration.md) | Bash consumes the static musl SDK; its remaining signal, directory, time, and POSIX gaps are Bash prerequisites. |
 | [`ON_TARGET_COMPILER_PLAN.md`](ON_TARGET_COMPILER_PLAN.md) | TinyCC should compile and link Bash-compatible utilities after `execve` and file creation work; it is not required to bootstrap the first Bash binary. |
 | [`OMEGA_SDK_PLAN.md`](OMEGA_SDK_PLAN.md) | Bash belongs to the `posix-static` profile, after the small-shell milestone. |
+| [`POSIX_COMMANDS_PORTING_PLAN.md`](POSIX_COMMANDS_PORTING_PLAN.md) | Defines the standalone `/bin` command slice, its three-ISA build validation, and kernel runtime prerequisites. |
 | [`ABI.md`](ABI.md) | Bash depends on stable process, descriptor, signal, ELF, and initial-stack ABI behavior. |
 | [`ROADMAP.md`](ROADMAP.md) | Phase 7.D.5 should track script shell separately from interactive shell; Phase 10A.5 consumes the completed terminal/job-control work. |
 | [`RUNNING.md`](RUNNING.md) | Add build and QEMU launch commands only after the scripts exist. |

@@ -68,6 +68,26 @@ intermediates live under `build/tcc-<isa>/`. CMake users can enable the same
 workflow with `-DOMEGA_BUILD_USERSPACE=ON` and optionally
 `-DOMEGA_BUILD_TCC=ON`.
 
+### Static POSIX command suite
+
+The first standalone command set is built against the same per-ISA musl SDK:
+
+```bash
+bash scripts/test_commands_build.sh
+# Or build one architecture:
+bash scripts/build_commands.sh x86_64
+bash scripts/build_commands.sh aarch64
+bash scripts/build_commands.sh riscv64
+```
+
+Artifacts are placed under `userland/commands/<isa>/bin/` and are statically
+linked. Enable the CMake target with
+`-DOMEGA_BUILD_USERSPACE=ON -DOMEGA_BUILD_COMMANDS=ON`. These artifacts are
+build-validated but are not yet advertised as QEMU-runtime complete because
+current-directory and filesystem mutation syscalls are still being finished.
+`cd` is a shell builtin, not an external command. See
+[`POSIX_COMMANDS_PORTING_PLAN.md`](POSIX_COMMANDS_PORTING_PLAN.md).
+
 **Automated tests:**
 
 ```bash

@@ -22,6 +22,13 @@ This completes the build/port milestone. The on-target compile-and-run
 milestone in Phase L5 is not yet claimed: it still requires a userspace
 `execve` workflow and a QEMU harness that boots TCC inside Omega.
 
+The first command-line consumer slice is now built from the same SDK with
+`scripts/build_commands.sh`: 14 standalone utilities are validated as static
+ELFs for all three ISAs. These host-built artifacts provide the planned
+`/bin` bootstrap surface, but on-target compilation and execution remain gated
+by the process, current-directory, and filesystem mutation work described in
+[`POSIX_COMMANDS_PORTING_PLAN.md`](POSIX_COMMANDS_PORTING_PLAN.md).
+
 ## 1. Purpose and Positioning
 
 Omega currently builds as a **freestanding** kernel: the userspace runtime
@@ -322,6 +329,7 @@ three ISAs.
 | :--- | :--- |
 | `docs/libc-integration.md` | Defines the musl port (L1–L3) this plan builds on; phases L1–L3 are shared prerequisites |
 | `docs/OMEGA_SDK_PLAN.md` | Defines SDK profiles; TCC is the on-target compiler for the `posix-static` profile |
+| `docs/POSIX_COMMANDS_PORTING_PLAN.md` | Defines the initial utilities TCC must eventually compile and the `/bin` runtime prerequisites |
 | `docs/ROADMAP.md` | Phase 10.1.1 (C Library), Phase 7.D.5 (Userspace bootstrap) |
 | `docs/ABI.md` | Syscall numbers and calling conventions unchanged; this plan depends on the ABI being frozen |
 | `docs/ARCHITECTURE.md` | HAL interfaces unchanged; TCC + musl sit entirely in userspace |
