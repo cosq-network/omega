@@ -19,8 +19,11 @@ echo "  Omega Bootable Disk Image Generator Test Suite "
 echo "================================================="
 
 # 1. Execute Disk Generator Script
-echo "[*] Executing scripts/create_bootable_disk.sh..."
-bash "${SCRIPT}" > /dev/null
+echo "[*] Executing scripts/create_bootable_disk.sh in legacy FAT compatibility mode..."
+# This test uses mdir directly against the image and therefore intentionally
+# exercises the backwards-compatible single-volume format. The release path
+# uses the default GPT + FAT32 ESP + ext4 root layout.
+bash "${SCRIPT}" --legacy-fat > /dev/null
 
 verify_arch_image() {
     local arch=$1

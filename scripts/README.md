@@ -18,7 +18,7 @@ the toolchain files in `cmake/` and target `x86_64`, `aarch64`, and `riscv64`.
 | Script | Purpose | Mutates repository artifacts? |
 | --- | --- | --- |
 | `run_qemu.sh` | Build-if-needed and launch the x86_64 kernel with display, storage, network, initrd, and lifecycle options | No, except build output when missing |
-| `create_bootable_disk.sh` | Build selected kernels and generate RAW/FAT32, QCOW2, VMDK, and VDI images | Yes: configured build/image roots |
+| `create_bootable_disk.sh` | Build selected kernels and generate GPT images with a FAT32 ESP, ext4 root, QCOW2/VMDK/VDI conversions, and the installed SDK/command payload | Yes: configured build/image roots |
 | `test_disk_images.sh` | Generate and validate bootable images and embedded payload paths | Yes: test images in `disk_images/` |
 | `test.sh` | Full multi-architecture, display, storage, script, and OVD regression suite | Yes: build/test logs and temporary OVD state |
 | `test_display.sh` | x86_64 Bochs VBE and VGA text-mode matrix | Build output and temporary QEMU logs |
@@ -108,7 +108,7 @@ for managed `start`, `stop`, `status`, and `logs` operations.
 
 ```sh
 ./scripts/create_bootable_disk.sh
-./scripts/create_bootable_disk.sh --arch aarch64 --size 128
+./scripts/create_bootable_disk.sh --arch aarch64 --size 512
 ./scripts/create_bootable_disk.sh --output-dir /tmp/omega-images --no-build
 ./scripts/create_bootable_disk.sh --dry-run
 ./scripts/test_disk_images.sh
@@ -239,11 +239,15 @@ command -v qemu-system-aarch64
 command -v qemu-system-riscv64
 command -v qemu-img
 command -v mformat
+command -v sgdisk
+command -v mkfs.ext4
+command -v debugfs
 ```
 
-`qemu-img` is required for converted image formats. `mtools` is required to
-populate and inspect FAT32 payloads. Raw images can still be generated
-without either optional dependency.
+`qemu-img` is required for converted image formats. The default GPT + ext4
+image path requires `sgdisk`, `mkfs.ext4`, `debugfs`, FAT formatting tools, and
+`mtools`. Use `--legacy-fat` only for compatibility tests that inspect the old
+single-volume FAT layout directly.
 
 If a kernel ELF is missing, build directly with full output:
 

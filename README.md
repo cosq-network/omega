@@ -55,7 +55,7 @@
 - **Cross-Architecture Storage Foundation**: Common block requests, device lifecycle and driver registration, DMA mapping, GPT/MBR parsing, ext4 filesystem mounting via partition offset, writable/read-only policy, flush/barrier handling, and a synthetic block backend verified on x86_64, AArch64, and RISC-V.
 - **VirtIO-Block Path**: Opt-in x86_64 transitional VirtIO-PCI discovery with legacy queue geometry, feature negotiation, and verified read/write/flush completion; AArch64/RISC-V VirtIO-MMIO remains experimental. Enable with `-DENABLE_EXPERIMENTAL_VIRTIO_BLOCK=ON`.
 - **Firmware & Bootloader Compatibility**: Compatible with **UEFI/GPT**, **U-Boot** (`bootefi` / `booti`), and **Coreboot** (TianoCore / GRUB).
-- **Multi-Format Virtual Disk Image Generator**: Generates RAW (`.img`), QCOW2 (`.qcow2`), VMDK (`.vmdk`), and VDI (`.vdi`) disk images with embedded FAT32 payloads (`/EFI/BOOT/` and `/boot/omega.elf`).
+- **Multi-Format Virtual Disk Image Generator**: Generates GPT RAW (`.img`), QCOW2 (`.qcow2`), VMDK (`.vmdk`), and VDI (`.vdi`) images with a FAT32 EFI System Partition, ext4 root, and installed musl/TinyCC/POSIX payload; `--legacy-fat` preserves the old single-volume format.
 - **Omega Virtual Device (OVD) Manager & GUI**: Android-like multi-architecture device manager with schema validation, predefined real-device profiles, ext4 artifact/digest checks, safe process lifecycle commands, daemon logs/QMP state, snapshots, import/export, networking/initrd/ephemeral profiles, selectable storage transports, a styled VirtualBox-inspired Tkinter manager, and an integrated resilient VNC viewer with keyboard, mouse, framebuffer, and clipboard support.
 - **OVD Real-Device Profile Catalog**: Versioned x86_64, AArch64, and RISC-V profile definitions with deterministic validation/rendering, ext4-default native artifact policy, and explicit external-adapter classification.
 - **Containerization & CI/CD**: Minimal Alpine-based `Dockerfile`, VSCode DevContainers/Codespaces (`.devcontainer/devcontainer.json`), and GitHub Actions CI/CD (`.github/workflows/ci.yml`).
@@ -297,7 +297,7 @@ docker run -it --rm -v $(pwd):/workspace omega-dev
 ### 3. Generate Bootable Virtual Disk Images
 ```bash
 ./scripts/create_bootable_disk.sh
-./scripts/create_bootable_disk.sh --arch aarch64 --size 128
+./scripts/create_bootable_disk.sh --arch aarch64 --size 512
 ./scripts/create_bootable_disk.sh --output-dir /tmp/omega-images --dry-run
 ```
 
